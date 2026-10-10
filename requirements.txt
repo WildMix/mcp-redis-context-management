@@ -1,0 +1,9 @@
+# MCP server (stdio) — official Python SDK; FastMCP API of the 1.x line
+mcp>=1.12,<2
+
+# Redis client with the RediSearch (FT.*) command API
+redis>=5.0
+
+# Local embeddings (all-MiniLM-L6-v2, 384 dims); pulls in torch (CPU wheel on Windows)
+sentence-transformers>=3.0
+numpy>=1.26

@@ -1,0 +1,15 @@
+# Directories that `python migrate_memory.py` indexes when it is run without arguments.
+# One per line; ~ and %VARS% are expanded; missing directories are skipped with a warning.
+# Inside a git checkout only the .md files git does not ignore are read (no external/, build/, dist/).
+
+# bodhidharma: the three worktrees (master, codex/*, claude/*)
+~/bodhidharma
+~/bodhidharma-codex
+~/bodhidharma-claude
+
+# Claude Code auto-memory of those checkouts
+~/.claude/projects/C--Users-e562225-bodhidharma/memory
+~/.claude/projects/C--Users-e562225-bodhidharma-claude/memory
+
+# Not listed: ~/.codex/memories is one store shared by every Codex project on this machine,
+# so it would mix other projects into bodhidharma's memory.
