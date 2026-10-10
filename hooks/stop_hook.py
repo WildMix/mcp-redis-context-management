@@ -10,6 +10,8 @@ the reason as the agent's next instruction. That continuation ends with stop_hoo
 lets the turn finish. Anything unexpected lets the turn finish too: a hook must never trap an agent.
 
 Standard library only, so it starts in milliseconds.
+
+    python stop_hook.py --check [DIR]   # is the hook active in DIR (default: here), and what would it say?
 """
 from __future__ import annotations
 
@@ -131,19 +133,48 @@ def turn_activity(entries: list[dict]) -> tuple[bool, bool]:
     return changed, saved
 
 
+def decide(event: dict) -> dict | None:
+    """The hook's answer to a Stop event: a block with the save instruction, or None to let the turn end."""
+    cwd = event.get("cwd") or os.getcwd()
+    transcript = event.get("transcript_path")
+    if not transcript or not listed(cwd):
+        return None
+    entries = new_entries(Path(transcript), str(event.get("session_id") or "unknown"))
+    if event.get("stop_hook_active"):  # the continuation this hook asked for: let the turn end
+        return None
+    changed, saved = turn_activity(entries)
+    return {"decision": "block", "reason": REASON.format(cwd=cwd)} if changed and not saved else None
+
+
+def check(directory: str) -> None:
+    """--check [DIR]: whether the hook is active in DIR, and its answer to a turn that edited a file there."""
+    directory = os.path.abspath(directory)
+    print(f"Directory list: {DIRECTORIES_FILE} ({'found' if DIRECTORIES_FILE.is_file() else 'missing'})")
+    if not listed(directory):
+        print(f"{directory} is not listed: the hook lets every turn there end without asking anything.")
+        return
+    session = f"check-{os.getpid()}"
+    with tempfile.TemporaryDirectory() as tmp:  # a one-entry transcript: an agent that edited a file
+        transcript = Path(tmp) / "transcript.jsonl"
+        transcript.write_text(json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Edit", "input": {"file_path": "example.txt"}}]}}) + "\n", encoding="utf-8")
+        answer = decide({"session_id": session, "transcript_path": str(transcript), "cwd": directory})
+    (STATE_DIR / f"{session}.json").unlink(missing_ok=True)
+    if answer:
+        print(f"{directory} is listed. After a turn that edits a file, the hook blocks the stop and tells "
+              f"the agent:\n\n{answer['reason']}")
+    else:
+        print(f"{directory} is listed, but the hook did not react to a simulated edit: this is a bug.")
+
+
 def main() -> None:
+    if sys.argv[1:2] == ["--check"]:
+        check(sys.argv[2] if len(sys.argv) > 2 else os.getcwd())
+        return
     try:
-        event = json.loads(sys.stdin.buffer.read().decode("utf-8"))
-        cwd = event.get("cwd") or os.getcwd()
-        transcript = event.get("transcript_path")
-        if not transcript or not listed(cwd):
-            return
-        entries = new_entries(Path(transcript), str(event.get("session_id") or "unknown"))
-        if event.get("stop_hook_active"):  # the continuation this hook asked for: let the turn end
-            return
-        changed, saved = turn_activity(entries)
-        if changed and not saved:
-            print(json.dumps({"decision": "block", "reason": REASON.format(cwd=cwd)}))
+        answer = decide(json.loads(sys.stdin.buffer.read().decode("utf-8")))
+        if answer:
+            print(json.dumps(answer))
     except Exception:
         return
 

@@ -39,7 +39,7 @@ The server works out the directory each call is about from:
 | `mcp_server.py` | The MCP server; `--query "..."` runs one search in the terminal |
 | `memory_store.py` | Shared by both scripts: settings, Redis connection, index schema, project names, chunking |
 | `migrate_memory.py` | One-off import of existing Markdown; `--rebuild` re-embeds everything |
-| `hooks/stop_hook.py` | The Stop hook for Claude Code and Codex (standard library only) |
+| `hooks/stop_hook.py` | The Stop hook for Claude Code and Codex (standard library only); `--check DIR` says whether it acts in `DIR` |
 | `hook_directories.example.txt` | Template for `hook_directories.txt`, the directories where the hook is active |
 
 ## 1. Start Redis
@@ -100,13 +100,14 @@ To let agents use both tools without a permission prompt each time, add these to
 ```
 
 **Codex**: add this to `~/.codex/config.toml`. `default_tools_approval_mode = "approve"` runs the
-tools without asking. Codex's 10 s default startup timeout is too short (see "Startup time" below).
+tools without asking. The longer timeouts cover a cold start: the first call waits for the model to
+load and, with WSL, for Redis to come back.
 
 ```toml
 [mcp_servers.project-memory]
 command = '<python>'
 args = ['<repo>/mcp_server.py']
-startup_timeout_sec = 60
+startup_timeout_sec = 30
 tool_timeout_sec = 120
 default_tools_approval_mode = "approve"
 
@@ -114,7 +115,7 @@ default_tools_approval_mode = "approve"
 REDIS_WSL_DISTRO = "Ubuntu"
 ```
 
-Check it with `claude mcp list` / `codex mcp list`, or with `/mcp` in a session.
+Section 6 shows how to check that both clients reach the server.
 
 ## 4. Turn on the hook
 
@@ -180,6 +181,91 @@ unchanged files are skipped, edited ones re-chunked, deleted ones dropped. Notes
 never touched. Identical paragraphs found in several worktrees show up once in search results, with
 the other copies listed.
 
+## 6. Verify the setup
+
+Go through these checks in order, since each relies on the ones before. `<project>` stands for a
+directory listed in `hook_directories.txt`.
+
+**1. Redis is up.** With Docker in WSL, prefix the command with `wsl -d Ubuntu --`.
+
+```sh
+docker exec project-memory-redis redis-cli ping
+```
+
+Expected: `PONG`.
+
+**2. The server works on its own.** This runs the server's own search code from the terminal,
+without any client: it loads the model, connects to Redis and searches the project.
+
+```sh
+<python> <repo>/mcp_server.py --query "setup check" --workdir <project>
+```
+
+Expected: a header naming the project, such as `3 closest entries of project "game" for "setup
+check"`, followed by the results. Before anything has been saved or imported, it prints `The project
+memory is empty: nothing has been saved or imported yet.` instead. Any other output is an error
+message saying what's wrong (Redis unreachable and how to start it, or a model mismatch).
+
+**3. Claude Code connects.**
+
+```sh
+claude mcp get project-memory
+```
+
+Expected: `Status: ✔ Connected`, with the command, arguments and environment you configured
+(`claude mcp list` shows the same status for every server). In a session, `/mcp` lists the server
+with its two tools.
+
+**4. Codex connects.** `codex mcp list` only shows the configuration (`enabled`). To check the
+connection itself, make one headless call from `<project>`:
+
+```sh
+codex exec "Call the search_project_memory tool with the query 'setup check' and print its output verbatim."
+```
+
+Expected: the same output as check 2. In the Codex TUI, `/mcp` lists the tools.
+
+**5. Saving and searching work end to end.** In an agent session in `<project>`, ask:
+
+> Save a note to the project memory titled "Setup check" with the content "Verifying the memory
+> setup.", then search the project memory for "setup check".
+
+Expected: `Saved note <note id> to the memory of project "<name>".`, and the note as the first
+search result: `note of <date> by claude-code` (or `codex-mcp-client`), with branch and worktree.
+Delete the note afterwards (see "Inspecting and maintaining").
+
+**6. The hook is set up for the directory.**
+
+```sh
+<python> <repo>/hooks/stop_hook.py --check <project>
+```
+
+Expected: `<project> is listed. After a turn that edits a file, the hook blocks the stop and tells
+the agent:`, followed by the instruction the agent will get. If it says `is not listed`,
+`hook_directories.txt` doesn't cover that directory. In Claude Code, `/hooks` should list the Stop
+hook. In Codex, `/hooks` should show it as trusted.
+
+**7. The hook fires in a real turn.** In a session in `<project>`, ask for a small real change, for
+example *"Create hook-check.txt containing 'ok'."* When the agent has done it:
+- **Claude Code** shows `Stop hook feedback` with the save instruction, then the agent calls
+  `save_to_project_memory`. Claude Code labels this a "blocking error", which is how it shows any
+  hook that keeps a turn going.
+- **Codex** keeps the turn going and the agent calls `save_to_project_memory`.
+
+Then delete `hook-check.txt` and the note. A turn that only reads files or runs read-only commands
+ends without a save request; that is by design.
+
+### Troubleshooting
+
+| Symptom | Likely cause and fix |
+| --- | --- |
+| Check 3 shows `✘ Failed to connect` | The client can't start the server. If check 2 works, the command or paths in the client's configuration are wrong. If check 2 fails too, its error says why (a missing package, Redis, ...). |
+| A tool answers `Redis is not reachable` | Start Redis (step 1). With Docker in WSL, set `REDIS_WSL_DISTRO` in the server's configuration. |
+| A tool answers `was built with ..., not ...` | The index was built with another embedding model. Set `EMBEDDING_MODEL` back, or run `migrate_memory.py --rebuild`. |
+| Searches show another project, or miss what you saved | Check the project named in the result header. If a client starts the server outside the project, the agent must pass `workdir` (the hook's instruction already does), or set `MEMORY_PROJECT`. |
+| The hook never asks | Check 6 says the directory is not listed; or Codex hasn't trusted the hook (`/hooks`); or the turn changed no files. |
+| After a real change the agent replies "Nothing to save to project memory." | It judged the change temporary, or it couldn't load the tool: check the server is connected (`/mcp`). |
+
 ## Using it
 
 Agents call the tools themselves; the hook covers saving. To nudge searching too, add a line to the
@@ -202,23 +288,60 @@ From a terminal:
 | `MEMORY_PROJECT` | unset | pins every call to one project name |
 | `REDIS_WSL_DISTRO` | unset | WSL distro running Docker, held open while a process uses Redis |
 
-Keys:
-- `project_memory:note:<id>:<n>`: one chunk of a saved note.
-- `project_memory:doc:<file id>:<n>`: one chunk of an imported file.
-- `project_memory:files`: imported file → digest.
-- `project_memory:meta`: model and dimension.
+## How the memory is stored
 
-Each chunk is a hash with its text, project, kind, title or section, source, time, embedding and, for
-notes, the agent, branch and worktree.
+Redis stores values under names called *keys*. Every entry of the memory is a Redis *hash* (a small
+record of named fields) under its own key. RediSearch keeps an index over those hashes, so that
+`search_project_memory` can find the nearest vectors within one project. All keys start with the
+index name, `project_memory` by default (`MEMORY_INDEX`). You never have to touch them, but knowing
+them helps when you inspect the memory, delete a wrong note, or start over.
+
+| Key | What it holds | Written | Read |
+| --- | --- | --- | --- |
+| `project_memory:note:<note id>:<n>` | One piece of a note saved by an agent. Fields: title, text, project, agent, branch, worktree, time, and the text's embedding (vector). A long note is split into pieces of at most 1000 characters (the model reads no more), numbered `0, 1, ...`. The note id is the save time plus a random suffix, e.g. `20261010-184708-0fcaa8`. | By `save_to_project_memory`, once per note. Notes are never edited afterwards. | By every search, through the index. When one piece matches, all pieces are read so the whole note is shown. |
+| `project_memory:doc:<file id>:<n>` | One paragraph-sized piece of an imported Markdown file. Fields: text, section path, source file, line range, project, embedding. The file id is a hash of the file's path. | By `migrate_memory.py`. A re-run replaces a file's pieces if the file changed since the last import, and deletes them if the file disappeared. | By every search, through the index. |
+| `project_memory:files` | One field per imported file: its path, mapped to a fingerprint of its content (and of the project and chunking settings). | By `migrate_memory.py`, after importing each file. | By `migrate_memory.py` only, to skip files that haven't changed. Delete this key to force a full re-import. |
+| `project_memory:meta` | The embedding model and vector size the index was built with. | When the index is created (by the first save or import), and again by `--rebuild`. | By every search and save. Vectors from different models can't be compared, so both refuse to run with another model. |
+| index `project_memory` | Not a key: RediSearch's index over every `note:` and `doc:` key. It covers the vector (HNSW, cosine), the project and kind tags, and the text. | Created by the first save or import; recreated by `--rebuild`. | By `search_project_memory`: a nearest-neighbour search limited to one project. |
+
+### Inspecting and maintaining
+
+RedisInsight (<http://localhost:8001>) lets you browse the keys and run commands. From a terminal,
+use `redis-cli` inside the container. With Docker in WSL, open a shell first with `wsl -d Ubuntu`;
+the commands are the same.
+
+```sh
+docker exec -it project-memory-redis redis-cli
+```
+
+| What | Command (in `redis-cli`) |
+| --- | --- |
+| Count a project's entries | `FT.SEARCH project_memory "@project:{game}" LIMIT 0 0` |
+| List its latest notes | `FT.SEARCH project_memory "@project:{game} @kind:{note}" RETURN 2 heading created SORTBY created DESC LIMIT 0 10` |
+| Read a note | `HGETALL project_memory:note:<note id>:0` (fields `content` and `heading`) |
+| Start over: delete everything | `FT.DROPINDEX project_memory DD` then `DEL project_memory:files project_memory:meta` |
+
+In these queries, escape non-letter characters in project names: `@project:{my\-game}`. A note split
+into several pieces is listed once per piece.
+
+To delete one note (every piece), run this from the container's host shell:
+
+```sh
+docker exec project-memory-redis sh -c "redis-cli --scan --pattern 'project_memory:note:<note id>:*' | xargs redis-cli DEL"
+```
 
 ## Startup time and a Windows trap
 
-The server imports sentence-transformers (and torch) and loads the model *before* it starts reading
-stdin, so its MCP handshake takes 5–15 s. Loading in the background would deadlock on Windows:
-scipy's Fortran runtime, pulled in through scikit-learn, probes stdin while it loads, and that probe
-blocks while the MCP transport has a read pending on the same pipe. For the same reason, every
-subprocess the server starts gets `stdin=DEVNULL`. If a client gives up connecting, raise its
-startup timeout (`MCP_TIMEOUT=60000` for Claude Code, `startup_timeout_sec` for Codex).
+The server answers the MCP handshake in about a second, then loads the model in the background,
+which takes 5–30 s (mostly importing torch; slower on a cold start). The first search or save waits
+for it.
+
+On Windows that background loading needs a workaround. While a read is pending on a pipe, every
+other operation on that pipe blocks, and scipy's Fortran runtime (pulled in through scikit-learn)
+inspects stdin while it loads. With the MCP transport waiting on stdin, loading the model would
+deadlock. So on Windows the server gives the transport a private pipe, fed by a thread that reads
+stdin only when `PeekNamedPipe` reports data waiting. No read is ever left pending on stdin. For the
+same reason, every subprocess the server starts gets `stdin=DEVNULL`.
 
 ## Licences
 

@@ -17,11 +17,11 @@ Claude Code and Codex set to the session's.
 from __future__ import annotations
 
 import argparse
-import functools
 import os
 import re
 import secrets
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -44,12 +44,57 @@ CANDIDATES = 30
 MAX_NOTE_CHARS = 6000
 
 
-@functools.cache
+_model = None
+_model_lock = threading.Lock()
+
+
 def embedding_model():
-    # main() calls this before the server reads stdin, never alongside it. On Windows, scipy's Fortran
-    # runtime (which sentence-transformers pulls in through scikit-learn) probes stdin while it loads,
-    # and that probe blocks for as long as the MCP transport has a read pending on the same pipe.
-    return load_model()
+    """The model, loaded once; main() starts loading it in the background as the server starts (5-30 s,
+    mostly importing torch), and the first search or save waits for it."""
+    global _model
+    with _model_lock:
+        if _model is None:
+            _model = load_model()
+        return _model
+
+
+def _feed_stdin_without_pending_reads() -> None:
+    """Windows only: give the MCP transport a private pipe, filled by a thread that reads stdin only when
+    data is already waiting, so no read ever stays pending on stdin.
+
+    A pending read on a pipe blocks every other operation on it, even a type query. scipy's Fortran
+    runtime (pulled in by sentence-transformers through scikit-learn) queries stdin while it loads, so
+    loading the model while the transport waited on stdin would deadlock; the handshake would then have
+    to wait for the model, and a cold start (30 s and more) overruns the clients' connection timeouts."""
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetFileType.argtypes = [wintypes.HANDLE]
+    kernel32.PeekNamedPipe.argtypes = [wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD, wintypes.LPVOID,
+                                       ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID]
+    stdin_fd = sys.stdin.fileno()
+    handle = msvcrt.get_osfhandle(stdin_fd)
+    if kernel32.GetFileType(handle) != 3:  # FILE_TYPE_PIPE; a console or a file is never left blocked
+        return
+    read_end, write_end = os.pipe()
+
+    def pump() -> None:
+        waiting = wintypes.DWORD()
+        try:  # PeekNamedPipe fails once the client closes its end
+            while kernel32.PeekNamedPipe(handle, None, 0, None, ctypes.byref(waiting), None):
+                if not waiting.value:
+                    time.sleep(0.01)
+                    continue
+                data = os.read(stdin_fd, waiting.value)  # returns at once: the bytes are there
+                while data:
+                    data = data[os.write(write_end, data):]
+        finally:
+            os.close(write_end)  # end of input for the transport, which then shuts the server down
+
+    threading.Thread(target=pump, name="stdin-pump", daemon=True).start()
+    sys.stdin = open(read_end, encoding="utf-8")  # FastMCP's stdio transport reads sys.stdin.buffer
 
 
 mcp = FastMCP(
@@ -249,8 +294,10 @@ def main() -> None:
     parser.add_argument("--workdir", default=os.getcwd(), help="directory whose project --query searches")
     args = parser.parse_args()
     hold_wsl_open()  # WSL and Redis start up while the model loads
-    embedding_model()  # 5-15 s, mostly importing torch
     if args.query is None:
+        if sys.platform == "win32":
+            _feed_stdin_without_pending_reads()
+        threading.Thread(target=embedding_model, name="model-loader", daemon=True).start()
         mcp.run()  # stdio transport: stdout carries the protocol, so nothing else may print there
         return
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
