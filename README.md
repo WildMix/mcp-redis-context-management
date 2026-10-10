@@ -1,127 +1,228 @@
 # Project memory over MCP (Redis vector search)
 
-A shared long-term memory for every agent working on a project. `migrate_memory.py` chunks the
-project's Markdown (docs, handoffs, agent memory files) and stores the chunks with local
-`all-MiniLM-L6-v2` embeddings in a Redis Stack vector index. `mcp_server.py` is a stdio MCP server
-with one tool, `search_project_memory(query)`, that returns the 3 closest chunks with file, line
-range and section. Claude Code and Codex both launch it, so every session in every worktree
-searches the same memory.
+A long-term memory shared by every coding agent on a project. Claude Code, Codex, parallel sessions
+and every git worktree all read and write the same memory. Agents save notes on what they changed and
+why, and search them before starting work, instead of re-deriving earlier decisions.
+
+- **`mcp_server.py`** is a stdio MCP server with two tools:
+  - `search_project_memory(query)` returns the 3 entries of the current project most similar to the
+    query.
+  - `save_to_project_memory(title, content)` stores a note.
+- **`hooks/stop_hook.py`** runs when an agent finishes a turn. If the turn changed files in a
+  configured directory and nothing was saved yet, it asks the agent to call
+  `save_to_project_memory` with what it changed, so memory gets written without anyone remembering
+  to.
+- **`migrate_memory.py`** imports context written *before* the save tool existed (docs, handoffs,
+  older agent memory files). You need it once per project, not day to day.
+
+Entries live in a Redis Stack vector index (RediSearch, HNSW, cosine). They are embedded locally with
+`sentence-transformers/all-MiniLM-L6-v2` (384 dimensions), so nothing leaves the machine.
+
+## How projects are told apart
+
+Each entry carries a project name: the folder name of the repository's main checkout. All worktrees
+of a repository therefore share one memory (`~/game`, `~/game-claude` and `~/game-codex` are all
+`game`). Outside git it's the directory's own name, and `MEMORY_PROJECT` overrides it.
+
+The server works out the directory each call is about from:
+1. the tool's optional `workdir` argument (which the hook always passes);
+2. else the client's MCP roots;
+3. else its own working directory. Claude Code and Codex both start stdio servers in the session's
+   directory, so one global registration serves every project.
+
+## Files
 
 | File | Role |
 | --- | --- |
-| `docker-compose.yml` | Redis Stack (Redis + RediSearch + RedisInsight) on `127.0.0.1:6379`, data in a volume |
+| `docker-compose.yml` | Redis Stack on `127.0.0.1:6379` (RedisInsight on `:8001`), data in a volume |
 | `requirements.txt` | `mcp`, `redis`, `sentence-transformers` (+ torch), `numpy` |
-| `migrate_memory.py` | Index the `.md` files of the given directories (default: `sources.txt`); incremental |
 | `mcp_server.py` | The MCP server; `--query "..."` runs one search in the terminal |
-| `memory_redis.py` | Settings and the Redis connection both scripts share (keeps WSL up, see below) |
-| `sources.txt` | The directories to index: the three bodhidharma worktrees and their Claude memory |
+| `memory_store.py` | Shared by both scripts: settings, Redis connection, index schema, project names, chunking |
+| `migrate_memory.py` | One-off import of existing Markdown; `--rebuild` re-embeds everything |
+| `hooks/stop_hook.py` | The Stop hook for Claude Code and Codex (standard library only) |
+| `hook_directories.example.txt` | Template for `hook_directories.txt`, the directories where the hook is active |
 
 ## 1. Start Redis
 
-Docker on this machine runs inside WSL (Ubuntu), so compose runs there. Port 6379 still reaches
-Windows (`networkingMode=mirrored`).
-
-```powershell
-wsl -d Ubuntu --cd /mnt/c/Users/e562225/mpc-redis-context-management -- docker compose up -d --wait
+```sh
+docker compose up -d --wait
 ```
 
-(With Docker Desktop it is just `docker compose up -d --wait`.) RedisInsight, to browse the
-index, is at <http://localhost:8001>. The container restarts with Docker
-(`restart: unless-stopped`), and the data survives in the `redis-data` volume (append-only file).
+The container restarts with Docker and keeps its data in the `redis-data` volume (append-only
+file). RedisInsight, for browsing the index, is at <http://localhost:8001>.
 
-**WSL stops an idle distro a few seconds after its last session, and Redis stops with it.** Set
-`REDIS_WSL_DISTRO=Ubuntu` (as the configs below do) and each script holds the distro open while it
-runs, waiting up to 60 s for Redis to come back. Without it, start Redis by hand before using the
-memory.
-
-## 2. Install and index
+**Windows with Docker inside WSL** (Docker Engine in a WSL distro, no Docker Desktop): run compose
+inside the distro.
 
 ```powershell
-cd C:\Users\e562225\mpc-redis-context-management
+wsl -d Ubuntu --cd /mnt/c/path/to/mpc-redis-context-management -- docker compose up -d --wait
+```
+
+- **Reaching Redis from Windows.** Windows reaches `127.0.0.1:6379` through WSL's localhost
+  forwarding. This was tested with `networkingMode=mirrored`.
+- **WSL stops idle distros.** WSL shuts a distro down seconds after its last session ends, and Redis
+  stops with it. Set `REDIS_WSL_DISTRO=Ubuntu` for the server and the scripts, as the configurations
+  below do. Every process using the memory then holds the distro open while it runs, and waits up to
+  60 s for Docker to bring Redis back.
+- **Git Bash** rewrites `/mnt/...` arguments to `wsl.exe`. Run the command from PowerShell, or
+  prefix it with `MSYS_NO_PATHCONV=1`.
+- **VPN address pools.** The compose file uses Docker's default bridge network. A dedicated compose
+  network fails with "all predefined address pools have been fully subnetted" when VPN routes cover
+  Docker's address pools.
+
+## 2. Install
+
+```sh
 python -m venv .venv
-.venv\Scripts\python -m pip install -r requirements.txt
-$env:REDIS_WSL_DISTRO = "Ubuntu"
-.venv\Scripts\python migrate_memory.py            # everything in sources.txt
-.venv\Scripts\python migrate_memory.py C:\some\docs  # or chosen directories
+.venv/Scripts/python -m pip install -r requirements.txt    # Windows; .venv/bin/python elsewhere
 ```
 
-The first run downloads the model (about 90 MB, cached by Hugging Face) and embeds about 3,000
-chunks in 2–3 minutes on CPU. After that, runs are incremental:
-- unchanged files are skipped (a second or two, without loading the model);
-- edited files are re-chunked;
-- files deleted from an indexed directory leave the index.
+The first run downloads the model (about 90 MB, cached by Hugging Face).
 
-Inside a git checkout only files git does not ignore are read, so `external/`, `build/`, `dist/`
-and `.tools/` stay out. Use `--reset` to rebuild from scratch, which is required after changing
-`EMBEDDING_MODEL`.
+## 3. Register the server
 
-Try a search without any client:
+The examples use `<repo>` for this repository's absolute path, and `<python>` for its venv
+interpreter (`<repo>\.venv\Scripts\python.exe` on Windows, `<repo>/.venv/bin/python` elsewhere).
+Leave out `REDIS_WSL_DISTRO` when Docker runs natively.
 
-```powershell
-.venv\Scripts\python mcp_server.py --query "how is the fight stance animated?"
+**Claude Code**: register at user scope, so every project and worktree gets the tools.
+
+```sh
+claude mcp add --scope user project-memory -e REDIS_WSL_DISTRO=Ubuntu -- <python> <repo>/mcp_server.py
 ```
 
-The three worktrees hold copies of the same docs. A result that appears in several of them is shown
-once, with `same text in:` listing the other copies. A doc that exists only on one branch shows up
-under that worktree's path.
+To let agents use both tools without a permission prompt each time, add these to
+`permissions.allow` in `~/.claude/settings.json`:
 
-## 3. Connect Claude Code
-
-Register it at user scope, so it is available in all three worktrees (and every other project):
-
-```powershell
-claude mcp add --scope user project-memory -e REDIS_WSL_DISTRO=Ubuntu -- C:\Users\e562225\mpc-redis-context-management\.venv\Scripts\python.exe C:\Users\e562225\mpc-redis-context-management\mcp_server.py
-claude mcp list
+```json
+"mcp__project-memory__search_project_memory",
+"mcp__project-memory__save_to_project_memory"
 ```
 
-In a session, `/mcp` shows it connected; the tool is `mcp__project-memory__search_project_memory`.
-The server loads the model before it answers the handshake, which takes 5–15 s (see the comment in
-`embedding_model()`). If Claude Code times out connecting, start it with `MCP_TIMEOUT=60000`.
-
-## 4. Connect Codex
-
-Add this to `C:\Users\e562225\.codex\config.toml`. `codex mcp add` works too, but it cannot set the
-timeouts, and Codex's 10 s startup default is too short for loading torch.
+**Codex**: add this to `~/.codex/config.toml`. `default_tools_approval_mode = "approve"` runs the
+tools without asking. Codex's 10 s default startup timeout is too short (see "Startup time" below).
 
 ```toml
 [mcp_servers.project-memory]
-command = 'C:\Users\e562225\mpc-redis-context-management\.venv\Scripts\python.exe'
-args = ['C:\Users\e562225\mpc-redis-context-management\mcp_server.py']
+command = '<python>'
+args = ['<repo>/mcp_server.py']
 startup_timeout_sec = 60
 tool_timeout_sec = 120
+default_tools_approval_mode = "approve"
 
 [mcp_servers.project-memory.env]
 REDIS_WSL_DISTRO = "Ubuntu"
 ```
 
-`codex mcp list` should show it. In the TUI, `/mcp` lists its tool.
+Check it with `claude mcp list` / `codex mcp list`, or with `/mcp` in a session.
 
-## 5. Make agents use it
+## 4. Turn on the hook
 
-A tool is only called when the agent thinks of it. Add a line like this to the project's
-`CLAUDE.md` and `AGENTS.md`:
+List the directories where agents should be asked to save their changes:
 
-> Before working on a topic, call `search_project_memory` to recover earlier decisions, constraints
-> and handoffs. After adding or editing docs or memory files, run
-> `C:\Users\e562225\mpc-redis-context-management\.venv\Scripts\python.exe C:\Users\e562225\mpc-redis-context-management\migrate_memory.py`
-> (with `REDIS_WSL_DISTRO=Ubuntu`) so the other agents see them.
+```sh
+cp hook_directories.example.txt hook_directories.txt   # then edit: one directory per line
+```
+
+The hook is installed once per client. Without a `hook_directories.txt` entry, a directory gets
+nothing from it, so it never runs in unrelated projects.
+
+**Claude Code**: in `~/.claude/settings.json`:
+
+```json
+"hooks": {
+  "Stop": [
+    { "hooks": [ { "type": "command", "command": "<python> <repo>/hooks/stop_hook.py", "timeout": 30 } ] }
+  ]
+}
+```
+
+**Codex**: in `~/.codex/hooks.json`, same format:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "<python> <repo>/hooks/stop_hook.py", "timeout": 30 } ] }
+    ]
+  }
+}
+```
+
+Codex runs a new or changed hook only after you trust it: open `/hooks` in Codex once and approve
+it.
+
+On Windows, write paths in hook commands with forward slashes and without quotes (`C:/...`). The
+clients may run hooks through Git Bash, PowerShell or cmd, and that form works in all three.
+
+### What the hook does
+
+At the end of each turn it reads only the part of the transcript written since its previous run.
+- **When it asks.** If that part edited files (Claude's Edit/Write tools or Codex's patches), or ran
+  a shell command that changes files (`git commit`, `sed -i`, `>` redirects, `rm`, `Set-Content`,
+  ...), and did not save to the memory, the hook blocks the stop. The agent gets one more
+  instruction: call `save_to_project_memory` with what changed, why, and what the next agent must
+  know, or reply "Nothing to save to project memory." when the change isn't worth keeping.
+- **No loops.** The continuation ends with `stop_hook_active` set, which lets the turn finish.
+- **Never stuck.** Any error lets the turn finish too.
+
+## 5. Import existing context (optional, once)
+
+Context written before the save tool existed can be imported in one go. Directories inside a git
+checkout contribute only the `.md` files git does not ignore.
+
+```sh
+<python> migrate_memory.py --project game ~/game ~/game-claude ~/game-codex ~/.claude/projects/<id>/memory
+```
+
+Without `--project`, files go to the project of the current directory. Re-running is incremental:
+unchanged files are skipped, edited ones re-chunked, deleted ones dropped. Notes saved by agents are
+never touched. Identical paragraphs found in several worktrees show up once in search results, with
+the other copies listed.
+
+## Using it
+
+Agents call the tools themselves; the hook covers saving. To nudge searching too, add a line to the
+project's `CLAUDE.md` / `AGENTS.md`, such as: *"Before working on a topic, call
+`search_project_memory` to recover earlier decisions and constraints."*
+
+From a terminal:
+
+```sh
+<python> mcp_server.py --query "why did the build switch to clang?" --workdir ~/game
+```
 
 ## Settings (environment variables)
 
 | Variable | Default | |
 | --- | --- | --- |
 | `REDIS_URL` | `redis://localhost:6379/0` | |
-| `MEMORY_INDEX` | `project_memory` | index name and key prefix: one index per project if you add more |
-| `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | 384 dims; the server refuses an index built with another model |
-| `REDIS_WSL_DISTRO` | unset | WSL distro running Docker, held open while a script runs |
+| `MEMORY_INDEX` | `project_memory` | index name and key prefix |
+| `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | after changing it, run `migrate_memory.py --rebuild` |
+| `MEMORY_PROJECT` | unset | pins every call to one project name |
+| `REDIS_WSL_DISTRO` | unset | WSL distro running Docker, held open while a process uses Redis |
 
-Keys: `project_memory:chunk:<file id>:<n>` holds one chunk (content, heading, source, lines,
-embedding). `project_memory:files` maps each source to its digest. `project_memory:meta` records
-the model and dimension.
+Keys:
+- `project_memory:note:<id>:<n>`: one chunk of a saved note.
+- `project_memory:doc:<file id>:<n>`: one chunk of an imported file.
+- `project_memory:files`: imported file → digest.
+- `project_memory:meta`: model and dimension.
+
+Each chunk is a hash with its text, project, kind, title or section, source, time, embedding and, for
+notes, the agent, branch and worktree.
+
+## Startup time and a Windows trap
+
+The server imports sentence-transformers (and torch) and loads the model *before* it starts reading
+stdin, so its MCP handshake takes 5–15 s. Loading in the background would deadlock on Windows:
+scipy's Fortran runtime, pulled in through scikit-learn, probes stdin while it loads, and that probe
+blocks while the MCP transport has a read pending on the same pipe. For the same reason, every
+subprocess the server starts gets `stdin=DEVNULL`. If a client gives up connecting, raise its
+startup timeout (`MCP_TIMEOUT=60000` for Claude Code, `startup_timeout_sec` for Codex).
 
 ## Licences
 
-These are all fine for internal commercial use:
+These are all fine for commercial use:
 - **all-MiniLM-L6-v2**: Apache-2.0.
 - **sentence-transformers, transformers**: Apache-2.0.
 - **torch**: BSD.

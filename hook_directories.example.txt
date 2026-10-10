@@ -1,0 +1,8 @@
+# Directories where the Stop hook (hooks/stop_hook.py) asks agents to save what they changed.
+# Copy this file to hook_directories.txt, which git ignores, and list one directory per line:
+# subdirectories are included; ~ and environment variables are expanded. Without
+# hook_directories.txt the hook does nothing.
+#
+# For a repository with worktrees, list each worktree: they all share one project memory.
+~/my-project
+~/my-project-feature-worktree

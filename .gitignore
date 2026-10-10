@@ -2,3 +2,5 @@
 __pycache__/
 *.pyc
 .idea/
+# local: where the Stop hook is active (see hook_directories.example.txt)
+hook_directories.txt
