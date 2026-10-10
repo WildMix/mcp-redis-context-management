@@ -268,9 +268,34 @@ ends without a save request; that is by design.
 
 ## Using it
 
-Agents call the tools themselves; the hook covers saving. To nudge searching too, add a line to the
-project's `CLAUDE.md` / `AGENTS.md`, such as: *"Before working on a topic, call
-`search_project_memory` to recover earlier decisions and constraints."*
+The hook makes sure agents save. Searching depends on the agent deciding to look things up. The
+tool's description and the server's instructions already tell agents to search before answering
+about design, past work or code they can't see. A guardrail in the project's own instruction files
+makes it stick, because agents read those at the start of every session. Put this in `AGENTS.md`
+(Codex and others) and in `CLAUDE.md` (Claude Code). In `CLAUDE.md`, write the tool names in full:
+`mcp__project-memory__search_project_memory` and `mcp__project-memory__save_to_project_memory`.
+
+```markdown
+## Project memory: search before you answer
+
+This project has a shared long-term memory, the `project-memory` MCP server, which every agent and
+worktree reads and writes. It holds the notes earlier sessions saved about what they changed and
+decided, and the project's docs and handoffs.
+
+**Zero-guessing policy.** You do not hold all of this project's context. When you are asked about a
+design pattern, feature, past implementation, earlier session or decision that you don't
+immediately know, or can't see in the files you have open, you must not guess, and you must not
+answer that you lack context. First call `search_project_memory`, then answer from what it returns.
+If a search misses, rephrase it before concluding nothing is recorded. A note is history: check it
+against the current code, and when they disagree, the code wins.
+
+**Saving.** When a turn changes files, the Stop hook asks you to call `save_to_project_memory`:
+record what changed and why, the decisions taken and the alternatives rejected, and what the next
+agent must know.
+```
+
+Commit both files on every branch agents work on: a session reads them from its own checkout. If
+they are identical everywhere, merges between branches stay conflict-free.
 
 From a terminal:
 

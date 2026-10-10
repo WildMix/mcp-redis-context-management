@@ -100,10 +100,14 @@ def _feed_stdin_without_pending_reads() -> None:
 mcp = FastMCP(
     "project-memory",
     log_level="WARNING",  # the root logger, to stderr: keeps per-request and model-loading INFO lines out
-    instructions="Long-term memory of the project you work in, shared by every agent and worktree on it: notes "
-                 "agents saved about what they changed and decided, and imported docs. Search it before working "
-                 "on a topic to recover earlier decisions and constraints instead of re-deriving them; save a note "
-                 "when you change something other agents should know about.",
+    # Clients show these instructions even when they defer the tools, so they carry the rule on their own.
+    instructions="CRITICAL: this server is the long-term memory of the project you are working in, shared by every "
+                 "agent and worktree: notes earlier sessions saved about what they changed and decided, plus the "
+                 "project's docs and handoffs. Call search_project_memory WHENEVER the user asks about the "
+                 "project's architecture, design, past sessions, decisions or an implementation that is not "
+                 "visible in the files you have open, before answering, planning or editing. Do not guess and do "
+                 "not say you lack context: search first (if the tool is deferred, load it by name). When you "
+                 "change something other agents should know about, record it with save_to_project_memory.",
 )
 
 
@@ -252,13 +256,19 @@ async def _directory(ctx: Context, workdir: str) -> str:
 
 @mcp.tool()
 async def search_project_memory(query: str, ctx: Context, workdir: str = "") -> str:
-    """Search the long-term memory of the project you are working in: notes other agents saved about what
-    they changed and decided, and imported docs (design notes, handoffs, earlier memory files). Every
-    worktree of a repository shares one memory.
+    """CRITICAL: Use this tool WHENEVER the user asks about the project's architecture, design, past
+    sessions, decisions or specific implementations that are not immediately visible in your current file
+    context. DO NOT guess or apologize for lacking context: you MUST call this tool first to retrieve the
+    project history before answering.
 
-    Ask in natural language ("how is the fight stance animated?", "why did the build move to clang?").
-    Returns the 3 most similar entries and where each comes from; for a doc, open the file at the given
-    lines for the surrounding context.
+    It searches the long-term memory of the project you are working in: notes other agents saved about
+    what they changed and decided, and the project's docs (design notes, handoffs, earlier memory files).
+    Every worktree of a repository shares one memory, and results come from this project only.
+
+    Ask in natural language ("how is authentication wired?", "why did the build move to clang?"). If a
+    search misses, rephrase it (other words, the feature's or file's name) before concluding that nothing
+    is recorded. Returns the 3 most similar entries and where each comes from: for a doc, open the file at
+    the given lines for the surrounding context; a note is history, so check it against the current code.
 
     Args:
         query: the question or topic to look up
