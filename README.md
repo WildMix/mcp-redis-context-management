@@ -372,6 +372,110 @@ To delete one note (every piece), run this from the container's host shell:
 docker exec project-memory-redis sh -c "redis-cli --scan --pattern 'project_memory:note:<note id>:*' | xargs redis-cli DEL"
 ```
 
+## Exporting the database and using it on another computer
+
+The database lives in Docker's persistent `redis-data` volume, mounted at `/data` inside
+`project-memory-redis`, not in this Git repository. With the default checkout name, the volume is
+`mpc-redis-context-management_redis-data`. With Docker Engine in Ubuntu WSL, its files live inside
+Ubuntu, normally at `/var/lib/docker/volumes/mpc-redis-context-management_redis-data/_data`.
+Cloning or pushing this repository does not transfer the database.
+
+To check the actual volume and location on your machine:
+
+```sh
+docker inspect project-memory-redis --format '{{json .Mounts}}'
+```
+
+For Docker in WSL, run Docker commands in an Ubuntu shell (`wsl -d Ubuntu`), or prefix them from
+PowerShell with `wsl -d Ubuntu --`. Windows paths then use `/mnt/c/...` inside Ubuntu.
+
+### Export a complete snapshot
+
+Run these commands on the computer containing the memory, from a directory where you want to
+save the export:
+
+```sh
+docker exec project-memory-redis redis-cli SAVE
+docker cp project-memory-redis:/data/dump.rdb ./project-memory.rdb
+docker inspect project-memory-redis --format '{{.Image}}'
+docker exec project-memory-redis redis-cli HGETALL project_memory:meta
+```
+
+Wait for `SAVE` to return `OK` before copying. It briefly blocks Redis while writing a consistent
+snapshot; the running database remains intact. Give colleagues `project-memory.rdb`, the image
+ID printed above, and the embedding model metadata. Use the same Redis Stack image version for
+restoring; `latest` may resolve to a different version on their computer. A registry digest can be
+found with `docker image inspect <image-id> --format '{{json .RepoDigests}}'` and used to pin the
+`image:` in their compose file.
+
+The snapshot contains **every Redis database and every project's memory in this instance**,
+including notes, imported document text, embeddings and search indexes. It is not a single-project
+export. Share it only with colleagues who should receive that content, and keep it out of Git.
+Each restored copy is independent: later edits do not synchronise between computers.
+
+### Restore into a fresh local instance
+
+On the receiving computer, clone this repository and place `project-memory.rdb` in its directory.
+Use a **fresh, empty Docker volume**; these instructions do not merge with an existing database.
+If this computer already has memory, export it first and restore the received snapshot in a
+separate instance instead. Do not delete an existing volume to follow these steps.
+
+1. Pin the sender's Redis Stack image in `docker-compose.yml`. Temporarily change its
+   `REDIS_ARGS` to `"--appendonly no --save 60 1"`.
+2. Create the container without starting Redis, copy in the snapshot, then start it:
+
+   ```sh
+   docker compose create redis
+   docker cp ./project-memory.rdb project-memory-redis:/data/dump.rdb
+   docker compose up -d --wait redis
+   docker exec project-memory-redis redis-cli DBSIZE
+   docker exec project-memory-redis redis-cli FT.INFO project_memory
+   ```
+
+   `DBSIZE` should show the restored keys in database 0 and `FT.INFO` should show the search index
+   (replace `project_memory` if the sender used a different `MEMORY_INDEX`). If startup fails,
+   inspect `docker compose logs redis` before proceeding.
+3. Enable append-only persistence **while the restored data is loaded**:
+
+   ```sh
+   docker exec project-memory-redis redis-cli CONFIG SET appendonly yes
+   docker exec project-memory-redis redis-cli INFO persistence
+   ```
+
+   Wait until `aof_rewrite_in_progress:0`, `aof_rewrite_scheduled:0`, and
+   `aof_last_bgrewrite_status:ok` appear, with `aof_enabled:1`.
+4. Restore `REDIS_ARGS` in the compose file to `"--appendonly yes --save 60 1"`, then run
+   `docker compose up -d --wait redis`. Repeat `DBSIZE` and `FT.INFO` to confirm the data survived
+   recreation.
+
+Disabling AOF for the initial load matters: when both persistence modes are enabled, Redis loads
+the append-only log in preference to `dump.rdb`. Enabling it afterwards creates an AOF from the
+restored data. See the [Redis persistence documentation](https://redis.io/docs/latest/management/persistence/).
+
+### Connect colleagues' agents to the restored memory
+
+Follow sections 2–4 to install Python dependencies, register the MCP server and configure the
+hooks. Keep the sender's `EMBEDDING_MODEL` and `MEMORY_INDEX`; the defaults work if the sender
+used the defaults. Use `REDIS_WSL_DISTRO=Ubuntu` only when Docker runs in that WSL distribution.
+The local connection remains `REDIS_URL=redis://localhost:6379/0`.
+
+Check out the relevant project under the same main folder name as the sender, or set
+`MEMORY_PROJECT` in the MCP server's environment to the stored project name. This override pins
+all calls to that one project. Then verify a search:
+
+```sh
+<python> mcp_server.py --query "a decision recorded in the shared memory" --workdir <project-checkout>
+```
+
+Stored document text is searchable immediately, but source paths still point to the sender's
+files. Import documents from colleagues' own checkouts with `migrate_memory.py --project <name>
+<directory>` if local source links are needed. Different absolute paths create new document
+records; reimporting does not automatically remove records pointing to the sender's paths.
+
+For a shared live database instead of independent copies, `REDIS_URL` can point to a team Redis
+Stack server. The supplied compose file binds only to localhost and has no password; remote use
+requires authentication, appropriate network access controls and transport protection.
+
 ## Startup time and a Windows trap
 
 The server answers the MCP handshake in about a second, then loads the model in the background,
