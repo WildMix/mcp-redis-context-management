@@ -159,11 +159,23 @@ clients may run hooks through Git Bash, PowerShell or cmd, and that form works i
 ### What the hook does
 
 At the end of each turn it reads only the part of the transcript written since its previous run.
-- **When it asks.** If that part edited files (Claude's Edit/Write tools or Codex's patches), or ran
-  a shell command that changes files (`git commit`, `sed -i`, `>` redirects, `rm`, `Set-Content`,
-  ...), and did not save to the memory, the hook blocks the stop. The agent gets one more
-  instruction: call `save_to_project_memory` with what changed, why, and what the next agent must
-  know, or reply "Nothing to save to project memory." when the change isn't worth keeping.
+- **When it asks.** It asks when that part changed the project's files and saved nothing to the
+  memory. "The project's files" means files in any worktree of the session's repository:
+  - edits from Claude's Edit/Write tools or Codex's patches;
+  - shell commands that change files (`git commit`, `sed -i`, `>` redirects, `rm`, `Set-Content`,
+    ...).
+
+  Edits to other repositories or to configuration elsewhere don't count. Neither does a command that
+  first moves to another directory (`cd`, `git -C`), or that only names paths outside the project.
+- **What it asks.** The hook keeps the turn going with one more instruction: decide whether the turn
+  taught something worth keeping. A save must be all of:
+  - **about this project**, not about other repositories, the agent's tools or this memory system;
+  - **new**, not already in the memory and not plain from the code, diff, commits or docs;
+  - **lasting**, such as a decision and its reasons, a rejected alternative, a constraint or a
+    gotcha.
+
+  When in doubt the agent replies "Nothing to save to project memory." The save tool's own
+  description states the same rule, so it also covers saves an agent makes without being asked.
 - **No loops.** The continuation ends with `stop_hook_active` set, which lets the turn finish.
 - **Never stuck.** Any error lets the turn finish too.
 
@@ -289,9 +301,14 @@ answer that you lack context. First call `search_project_memory`, then answer fr
 If a search misses, rephrase it before concluding nothing is recorded. A note is history: check it
 against the current code, and when they disagree, the code wins.
 
-**Saving.** When a turn changes files, the Stop hook asks you to call `save_to_project_memory`:
-record what changed and why, the decisions taken and the alternatives rejected, and what the next
-agent must know.
+**Saving.** Save with `save_to_project_memory` only knowledge about this project that is:
+- **new**: not already in the memory, and not plain from the code, commits or docs;
+- **lasting**: a decision and its reasons, a rejected alternative, a constraint, a gotcha, a
+  non-obvious cause, a known limitation or unfinished piece.
+
+Logs of edits, work on other repositories and work on your tools don't belong there. When a turn
+changes the project's files, the Stop hook asks you to make this check. If nothing qualifies, which
+is common, reply "Nothing to save to project memory."
 ```
 
 Commit both files on every branch agents work on: a session reads them from its own checkout. If

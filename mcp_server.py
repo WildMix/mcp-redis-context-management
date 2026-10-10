@@ -106,8 +106,9 @@ mcp = FastMCP(
                  "project's docs and handoffs. Call search_project_memory WHENEVER the user asks about the "
                  "project's architecture, design, past sessions, decisions or an implementation that is not "
                  "visible in the files you have open, before answering, planning or editing. Do not guess and do "
-                 "not say you lack context: search first (if the tool is deferred, load it by name). When you "
-                 "change something other agents should know about, record it with save_to_project_memory.",
+                 "not say you lack context: search first (if the tool is deferred, load it by name). Save with "
+                 "save_to_project_memory only new, lasting knowledge about this project (decisions and their "
+                 "reasons, constraints, gotchas) that the code, commits and docs don't already show.",
 )
 
 
@@ -283,9 +284,13 @@ async def save_to_project_memory(title: str, content: str, ctx: Context, workdir
     """Save a note to the long-term memory of the project you are working in, where every other agent and
     worktree on the project finds it with search_project_memory.
 
-    Record what another agent would need and cannot see from the code alone: what you changed and why,
-    the decisions taken and the alternatives rejected, constraints and gotchas found, and what is
-    unfinished or unverified. Write it to stand on its own for a reader who has not seen this
+    Save only knowledge that is all of:
+    - about this project itself (its code, design, architecture, assets, build or workflow), not about
+      other repositories, your tools, the agent setup or this memory system;
+    - new: not already in the memory, and not plain from the code, a diff, a commit message or the docs;
+    - lasting: a decision and its reasons, a rejected alternative, a constraint, a gotcha, a non-obvious
+      cause, a known limitation or unfinished piece. A log of edits or of this session is not.
+    When in doubt, don't save. Write the note to stand on its own for a reader who has not seen this
     conversation, and leave out secrets.
 
     Args:

@@ -1,4 +1,5 @@
-# Directories where the Stop hook (hooks/stop_hook.py) asks agents to save what they changed.
+# Directories where the Stop hook (hooks/stop_hook.py) asks agents, after a turn that changed the
+# project, whether it taught anything worth saving to the project memory.
 # Copy this file to hook_directories.txt, which git ignores, and list one directory per line:
 # subdirectories are included; ~ and environment variables are expanded. Without
 # hook_directories.txt the hook does nothing.
