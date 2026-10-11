@@ -1,4 +1,4 @@
-"""Stop hook for Claude Code and Codex: when a turn changed the project's files in a directory listed in
+"""Memory hook for Claude Code and Codex: when a turn changed the project's files in a directory listed in
 hook_directories.txt, ask the agent whether it learned anything worth saving to the project memory,
 and to save it with save_to_project_memory if so. Only new, lasting knowledge about the project
 qualifies (see REASON); a turn that teaches nothing ends with "Nothing to save to project memory."
@@ -11,6 +11,10 @@ ran a command that changes them there, without saving to the memory, it answers
 agent's next instruction. Changes to other repositories or to configuration elsewhere do not count.
 That continuation ends with stop_hook_active set, which lets the turn finish. Anything unexpected lets
 the turn finish too: a hook must never trap an agent.
+
+SessionStart with source=compact injects the same memory criteria after manual or automatic
+compaction. The agent reviews its existing summary and saves only qualifying knowledge, then
+continues its task. It does not require edits or read/advance the Stop transcript cursor.
 
 Standard library only, so it starts in milliseconds.
 
@@ -58,9 +62,8 @@ ABSOLUTE_PATH = re.compile(r"""(?:(?<=^)|(?<=[\s"'=(]))
                            + (r")" if os.name == "nt" else r"|/(?!dev/)[^\s\"';&|)]+)"), re.VERBOSE)
 ASSIGNMENT = re.compile(r"""(?:^|[\s;&|(])(?:export\s+)?([A-Za-z_]\w*)=("[^"]*"|'[^']*'|[^\s;&|)]*)""")
 
-REASON = """\
-This turn changed files in this project. Before you finish, decide whether it taught anything that \
-belongs in the project memory. Every agent working on this project (other sessions, other \
+MEMORY_RULES = """\
+Every agent working on this project (other sessions, other \
 worktrees, Claude or Codex) reads that memory, and it is only useful if it holds what they cannot \
 find anywhere else.
 
@@ -72,15 +75,29 @@ here.
 the code, the diff, the commit message or the docs.
 - It will still matter later: a decision and its reasons, a rejected alternative, a constraint, a \
 gotcha, a non-obvious cause, a known limitation or unfinished piece. A list of edits, or the state \
-of this session, is not.
+of this session, is not."""
 
-When in doubt, don't save: reply only "Nothing to save to project memory." and end your turn.
-
-Otherwise call the save_to_project_memory tool of the project-memory MCP server (in Claude Code: \
+SAVE_INSTRUCTION = """\
+For qualifying knowledge, call the save_to_project_memory tool of the project-memory MCP server (in Claude Code: \
 mcp__project-memory__save_to_project_memory) once, with workdir: {cwd}, a one-line title, and \
 content holding only that knowledge, written for an agent who has not seen this conversation. No \
 secrets. If the tool is not loaded, search for it by name: the server takes a few seconds to \
-connect. Then end your turn."""
+connect."""
+
+REASON = ("This turn changed files in this project. Before you finish, decide whether it taught "
+          "anything that belongs in the project memory.\n\n" + MEMORY_RULES + "\n\n"
+          'When in doubt, don\'t save: reply only "Nothing to save to project memory." and end your turn.\n\n'
+          + SAVE_INSTRUCTION + " Then end your turn.")
+
+COMPACTION_REASON = ("The conversation has just been compacted. Review the compaction summary in "
+                     "your current context for new, lasting knowledge about this project, including "
+                     "decisions reached without changing files. Do not save the full summary or a "
+                     "session recap. Search project memory for any candidate before saving to avoid "
+                     "duplicating earlier notes; check current code/docs if needed.\n\n"
+                     + MEMORY_RULES + "\n\n" + SAVE_INSTRUCTION + "\n\n"
+                     "If nothing qualifies or you are unsure, save nothing. After this check, "
+                     "continue the user's active task; if there is no active task, wait for input. "
+                     "This check does not end or replace the user's task.")
 
 
 def _native(path: str, base: str) -> str:
@@ -244,10 +261,20 @@ def turn_activity(entries: list[dict], cwd: str, roots: list[str]) -> tuple[bool
 
 
 def decide(event: dict) -> dict | None:
-    """The hook's answer to a Stop event: a block with the save instruction, or None to let the turn end."""
+    """Request a memory review after compaction, or after an unsaved turn with edits."""
     cwd = event.get("cwd") or os.getcwd()
+    if not listed(cwd):
+        return None
+    kind = event.get("hook_event_name", "Stop")
+    if kind == "SessionStart":
+        if event.get("source") == "compact":
+            return {"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                           "additionalContext": COMPACTION_REASON.format(cwd=cwd)}}
+        return None
+    if kind != "Stop":
+        return None
     transcript = event.get("transcript_path")
-    if not transcript or not listed(cwd):
+    if not transcript:
         return None
     entries = new_entries(Path(transcript), str(event.get("session_id") or "unknown"))
     if event.get("stop_hook_active"):  # the continuation this hook asked for: let the turn end

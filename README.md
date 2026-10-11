@@ -8,10 +8,9 @@ why, and search them before starting work, instead of re-deriving earlier decisi
   - `search_project_memory(query)` returns the 3 entries of the current project most similar to the
     query.
   - `save_to_project_memory(title, content)` stores a note.
-- **`hooks/stop_hook.py`** runs when an agent finishes a turn. If the turn changed files in a
-  configured directory and nothing was saved yet, it asks the agent to call
-  `save_to_project_memory` with what it changed, so memory gets written without anyone remembering
-  to.
+- **`hooks/stop_hook.py`** asks for a memory review when an agent finishes a turn with edits,
+  and after automatic or manual compaction. The agent searches for duplicates and saves only new,
+  lasting project knowledge; ordinary edit logs and session summaries stay out of memory.
 - **`migrate_memory.py`** imports context written *before* the save tool existed (docs, handoffs,
   older agent memory files). You need it once per project, not day to day.
 
@@ -52,7 +51,9 @@ The server works out the directory each call is about from:
 | `mcp_server.py` | The MCP server; `--query "..."` runs one search in the terminal |
 | `memory_store.py` | Shared by both scripts: settings, Redis connection, index schema, project names, chunking |
 | `migrate_memory.py` | One-off import of existing Markdown; `--rebuild` re-embeds everything |
-| `hooks/stop_hook.py` | The Stop hook for Claude Code and Codex (standard library only); `--check DIR` says whether it acts in `DIR` |
+| `hooks/stop_hook.py` | Stop and post-compaction memory review for Claude Code and Codex (standard library only); `--check DIR` checks directory scope |
+| `scripts/install-redis-autostart.ps1` | Windows task installer for shared Redis startup at sign-in, or optionally boot |
+| `scripts/keep-redis-running.ps1` | Hidden task worker: start the existing Redis container and keep WSL alive |
 | `hook_directories.example.txt` | Template for `hook_directories.txt`, the directories where the hook is active |
 | `tests/` | Unit regressions, disposable Redis integration tests, and an optional real-model smoke test |
 | `requirements-lock.txt` | Complete dependency snapshot of the tested environment |
@@ -84,6 +85,48 @@ wsl -d Ubuntu --cd /mnt/c/path/to/mpc-redis-context-management -- docker compose
 - **VPN address pools.** The compose file uses Docker's default bridge network. A dedicated compose
   network fails with "all predefined address pools have been fully subnetted" when VPN routes cover
   Docker's address pools.
+
+### Start shared Redis automatically on Windows
+
+All projects and both MCP clients already use the same Redis database at `localhost:6379/0`.
+Project tags separate their memories. To keep that database ready before the first MCP call, install
+one background task after creating the Redis container with compose:
+
+```powershell
+.\scripts\install-redis-autostart.ps1 -Distro Ubuntu
+```
+
+The default is **startup at sign-in**, under the Windows account that owns the WSL distribution.
+The task starts immediately too. It waits for Docker, starts the existing `project-memory-redis`
+container, checks `PONG`, and holds WSL open with a hidden process. It runs on battery, has no time
+limit, and retries WSL exits after 10 seconds. Task Scheduler also has a one-minute retry policy for
+failure of the worker itself. It preserves the existing database volume and does not
+create another Redis instance. Docker must already be enabled in the distro (`systemctl is-enabled
+docker`); the distro's user must be allowed to run Docker.
+
+```powershell
+Get-ScheduledTask -TaskName ProjectMemory-Redis
+Get-ScheduledTaskInfo -TaskName ProjectMemory-Redis
+Get-Content "$env:LOCALAPPDATA\project-memory\redis-autostart.log" -Tail 10
+```
+
+`Running` and task result `267009` (`0x41301`, task still running) are expected. The log should say
+`Redis ready; keeping WSL alive`. No console window stays open. Keep `REDIS_WSL_DISTRO=Ubuntu` in
+the MCP configuration as a fallback if the task is unavailable. Keeping Redis up removes the WSL
+and database startup delay; each new stdio MCP process still loads its embedding model on first use.
+
+For startup **before sign-in**, an administrator can instead run the installer with `-Mode Boot
+-UserId 'DOMAIN\user'`, using the Windows owner of the WSL distribution. This selects a boot trigger
+and an S4U logon without storing a password. Verify it after a reboot on the target machine: account
+policy can reject batch logons. On the machine where this was implemented, Windows denied boot task
+registration; sign-in startup was installed and verified instead.
+
+To remove automatic startup (without deleting Redis or its data):
+
+```powershell
+Stop-ScheduledTask -TaskName ProjectMemory-Redis
+Unregister-ScheduledTask -TaskName ProjectMemory-Redis -Confirm:$false
+```
 
 ## 2. Install
 
@@ -152,6 +195,9 @@ nothing from it, so it never runs in unrelated projects.
 
 ```json
 "hooks": {
+  "SessionStart": [
+    { "matcher": "^compact$", "hooks": [ { "type": "command", "command": "<python> <repo>/hooks/stop_hook.py", "timeout": 30 } ] }
+  ],
   "Stop": [
     { "hooks": [ { "type": "command", "command": "<python> <repo>/hooks/stop_hook.py", "timeout": 30 } ] }
   ]
@@ -163,6 +209,9 @@ nothing from it, so it never runs in unrelated projects.
 ```json
 {
   "hooks": {
+    "SessionStart": [
+      { "matcher": "^compact$", "hooks": [ { "type": "command", "command": "<python> <repo>/hooks/stop_hook.py", "timeout": 30 } ] }
+    ],
     "Stop": [
       { "hooks": [ { "type": "command", "command": "<python> <repo>/hooks/stop_hook.py", "timeout": 30 } ] }
     ]
@@ -200,6 +249,31 @@ At the end of each turn it reads only the part of the transcript written since i
   description states the same rule, so it also covers saves an agent makes without being asked.
 - **No loops.** The continuation ends with `stop_hook_active` set, which lets the turn finish.
 - **Never stuck.** Any error lets the turn finish too.
+
+### Memory review after compaction
+
+Both clients support `SessionStart` with `source: "compact"` after automatic compaction and manual
+`/compact`. The same script returns `hookSpecificOutput.additionalContext`, asking the continuing
+agent to review the summary already in its context. It uses the **same project/new/lasting criteria**
+as Stop, explicitly searches for duplicates before saving, and then resumes the active task. This
+also covers design discussions with no file edits. Ordinary startup, resume and clear events are
+ignored, and the configured directory list still applies.
+
+The script does not write the raw summary into Redis, launch another model, or advance the Stop
+hook's transcript cursor. The agent performs the judgment and calls `save_to_project_memory` only
+for qualifying facts. If nothing qualifies, no note is saved. Manual compaction while idle may leave
+this review pending until the next model turn; it does not create an independent agent turn.
+
+`PreCompact` runs before the summary exists. `PostCompact` is unsuitable for delivering this review
+instruction: Claude exposes `compact_summary` there but provides no decision/context control, and
+Codex does not document a summary field there. `SessionStart(compact)` is the shared mechanism for
+injecting context after compaction. See the official
+[Codex hook reference](https://learn.chatgpt.com/docs/hooks#sessionstart) and
+[Claude Code hook reference](https://code.claude.com/docs/en/hooks#sessionstart).
+
+Restart existing clients after changing hook configuration. In Codex, approve the new SessionStart
+entry in `/hooks`; adding it does not automatically trust it. Installed versions checked for this
+setup were Codex CLI 0.162.1 (desktop-bundled CLI 0.137.0-alpha.4) and Claude Code 2.1.283.
 
 ## 5. Import existing context (optional, once)
 

@@ -60,6 +60,40 @@ class HookTests(unittest.TestCase):
             answer = hook.decide({"cwd": self.cwd, "transcript_path": "ignored", "stop_hook_active": True})
         self.assertIsNone(answer)
 
+    def test_compaction_injects_shared_rules_without_edits_or_transcript(self):
+        with patch.object(hook, "listed", return_value=True), patch.object(hook, "new_entries") as read:
+            answer = hook.decide({"cwd": self.cwd, "hook_event_name": "SessionStart", "source": "compact"})
+        read.assert_not_called()  # Compaction must not consume the Stop hook's pending edits.
+        self.assertNotIn("decision", answer)
+        output = answer["hookSpecificOutput"]
+        self.assertEqual(output["hookEventName"], "SessionStart")
+        self.assertIn(hook.MEMORY_RULES, output["additionalContext"])
+        self.assertIn(self.cwd, output["additionalContext"])
+        self.assertIn("Search project memory", output["additionalContext"])
+        self.assertIn("continue the user's active task", output["additionalContext"])
+
+    def test_compaction_respects_directory_scope(self):
+        with patch.object(hook, "listed", return_value=False):
+            self.assertIsNone(hook.decide({"cwd": self.cwd, "hook_event_name": "SessionStart", "source": "compact"}))
+
+    def test_other_events_and_session_starts_do_not_consume_stop_cursor(self):
+        with patch.object(hook, "listed", return_value=True), patch.object(hook, "new_entries") as read:
+            for kind, source in [("SessionStart", "startup"), ("SessionStart", "resume"),
+                                 ("SessionStart", "clear"), ("PreCompact", ""), ("PostCompact", "")]:
+                with self.subTest(kind=kind, source=source):
+                    self.assertIsNone(hook.decide({"cwd": self.cwd, "hook_event_name": kind,
+                                                  "source": source, "transcript_path": "unused"}))
+        read.assert_not_called()
+
+    def test_stop_still_requests_review_after_compaction(self):
+        with patch.object(hook, "listed", return_value=True), \
+                patch.object(hook, "new_entries", return_value=[self.edit]), \
+                patch.object(hook, "project_dirs", return_value=self.roots):
+            hook.decide({"cwd": self.cwd, "hook_event_name": "SessionStart", "source": "compact"})
+            answer = hook.decide({"cwd": self.cwd, "hook_event_name": "Stop", "transcript_path": "unused"})
+        self.assertEqual(answer["decision"], "block")
+        self.assertIn(hook.MEMORY_RULES, answer["reason"])
+
     def test_transcript_offset_preserves_unfinished_line(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(hook, "STATE_DIR", Path(tmp) / "state"):
             path = Path(tmp) / "session.jsonl"
