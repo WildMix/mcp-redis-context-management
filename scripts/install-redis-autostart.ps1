@@ -34,6 +34,16 @@ $definition = New-ScheduledTask -Action $taskAction -Trigger $taskTrigger -Princ
     -Settings $taskSettings -Description "Project memory Redis: keep $Distro and the existing shared Redis container ready ($Mode startup)."
 # Registration failure leaves the previous task untouched.
 Register-ScheduledTask -TaskName $taskName -InputObject $definition -Force | Out-Null
-if ($existing -and $existing.State -eq 'Running') { Stop-ScheduledTask -TaskName $taskName }
+if ($existing -and $existing.State -eq 'Running') {
+    $oldWorkers = @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" |
+        Where-Object { $_.CommandLine -and $_.CommandLine.Contains($worker) } |
+        ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue })
+    Stop-ScheduledTask -TaskName $taskName
+    # Stop is asynchronous. Wait for the previous worker's console to close before starting a
+    # replacement, otherwise Windows can send the replacement the old console's close signal.
+    foreach ($oldWorker in $oldWorkers) {
+        if (-not $oldWorker.WaitForExit(30000)) { throw 'The previous Redis keeper did not stop within 30 seconds.' }
+    }
+}
 Start-ScheduledTask -TaskName $taskName
 Write-Output "Installed $taskName for $UserId ($Mode). Check Get-ScheduledTaskInfo and the log in LOCALAPPDATA\project-memory."

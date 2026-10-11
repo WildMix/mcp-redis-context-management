@@ -27,7 +27,7 @@ until docker exec project-memory-redis redis-cli ping | grep -q '^PONG'; do
     sleep 1
 done
 echo 'Redis ready; keeping WSL alive'
-exec sleep infinity
+exec cat >/dev/null
 '@
 while ($true) {
     $keeper = New-Object System.Diagnostics.Process
@@ -43,7 +43,9 @@ while ($true) {
         $keeperStarted = $keeper.Start()
         $errors = $keeper.StandardError.ReadToEndAsync()
         $keeper.StandardInput.Write($linuxCommand.Replace("`r", '') + "`n")
-        $keeper.StandardInput.Close()
+        # Keep stdin open: cat exits on EOF when this Windows process ends, so stopping or
+        # replacing the task does not leave a detached Linux sleep process behind.
+        $keeper.StandardInput.Flush()
         while ($null -ne ($line = $keeper.StandardOutput.ReadLine())) {
             Add-Content -LiteralPath $logPath -Value "$(Get-Date -Format o) $line"
         }
@@ -53,7 +55,10 @@ while ($true) {
     } catch {
         Add-Content -LiteralPath $logPath -Value "$(Get-Date -Format o) $_; retrying in 10 seconds"
     } finally {
-        if ($keeperStarted -and -not $keeper.HasExited) { $keeper.Kill() }
+        if ($keeperStarted) {
+            $keeper.StandardInput.Close()
+            if (-not $keeper.HasExited) { $keeper.Kill() }
+        }
         $keeper.Dispose()
     }
     if ((Get-Item -LiteralPath $logPath).Length -gt 1MB) {
