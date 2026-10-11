@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import secrets
 import sys
 import threading
@@ -33,9 +32,9 @@ from mcp import types
 from mcp.server.fastmcp import Context, FastMCP
 from redis.commands.search.query import Query
 
-from memory_store import (INDEX_NAME, MAX_CHARS, NOTE_PREFIX, check_model, connect, create_index, embedding_text,
-                          encode, git, hold_wsl_open, index_exists, load_model, model_dimension, project_of,
-                          split_long, tag)
+from memory_store import (INDEX_NAME, Chunk, Namespace, check_model, connect, embedding_text, ensure_index,
+                          encode, fit_chunks, git, hold_wsl_open, index_exists, load_model, model_dimension,
+                          mutate, namespace_of, project_of, tag)
 
 TOP_K = 3
 # Every worktree holds its own copy of the shared docs, so the nearest neighbours are often one
@@ -124,24 +123,42 @@ def search(query: str, directory: str) -> str:
         return "Empty query: ask a question or name a topic."
     project = project_of(directory)
     r = connect()
-    if not index_exists(r):
-        return "The project memory is empty: nothing has been saved or imported yet."
-    check_model(r)
+    for _ in range(3):
+        namespace = namespace_of(r)
+        try:
+            if not index_exists(r, namespace.index):
+                result = "The project memory is empty: nothing has been saved or imported yet."
+            else:
+                check_model(r)
+                result = _search(query, project, r, namespace)
+        except Exception:
+            if namespace_of(r) != namespace:
+                continue
+            raise
+        if namespace_of(r) == namespace:
+            return result
+    raise RuntimeError("The memory was rebuilt repeatedly during this search; retry it.")
 
+
+def _search(query: str, project: str, r, namespace: Namespace) -> str:
     vector = encode(embedding_model(), [query])[0]
-    knn = (Query(f"(@project:{{{tag(project)}}})=>[KNN {CANDIDATES} @embedding $vector AS distance]")
-           .sort_by("distance")
-           .return_fields("kind", "content", "heading", "source", "start_line", "end_line", "content_sha",
-                          "note_id", "parts", "created", "agent", "branch", "worktree", "distance")
-           .paging(0, CANDIDATES)
-           .dialect(2))
-    docs = r.ft(INDEX_NAME).search(knn, query_params={"vector": vector.tobytes()}).docs
-
-    groups: dict[str, list] = {}  # one result per note, and per doc text that several worktrees share
-    for doc in docs:
-        key = _field(doc, "note_id") or _field(doc, "content_sha")
-        if key in groups or len(groups) < TOP_K:
-            groups.setdefault(key, []).append(doc)
+    candidates = CANDIDATES
+    while True:
+        knn = (Query(f"(@project:{{{tag(project)}}})=>[KNN {candidates} @embedding $vector AS distance]")
+               .sort_by("distance")
+               .return_fields("kind", "content", "heading", "source", "start_line", "end_line", "content_sha",
+                              "note_id", "parts", "join_mode", "created", "agent", "branch", "worktree", "distance")
+               .paging(0, candidates)
+               .dialect(2))
+        docs = r.ft(namespace.index).search(knn, query_params={"vector": vector.tobytes()}).docs
+        groups: dict[str, list] = {}
+        for doc in docs:
+            key = _field(doc, "note_id") or _field(doc, "content_sha") or doc.id
+            if key in groups or len(groups) < TOP_K:
+                groups.setdefault(key, []).append(doc)
+        if len(groups) >= TOP_K or len(docs) < candidates:
+            break
+        candidates *= 2
     if not groups:
         return f'Nothing in the memory of project "{project}" yet.'
 
@@ -149,7 +166,7 @@ def search(query: str, directory: str) -> str:
     for i, (best, *copies) in enumerate(groups.values(), 1):
         similarity = f"similarity {1 - float(best.distance):.2f}"
         if _field(best, "kind") == "note":
-            parts.append(f"[{i}] {_describe_note(best)}  {similarity}\n{_note_text(r, best)}")
+            parts.append(f"[{i}] {_describe_note(best)}  {similarity}\n{_note_text(r, best, namespace)}")
             continue
         lines = [f"[{i}] doc {best.source}:{best.start_line}-{best.end_line}  {similarity}"]
         if best.heading:
@@ -170,30 +187,24 @@ def _describe_note(doc) -> str:
     return f"note of {when}{by}{on}{where}"
 
 
-def _note_text(r, doc) -> str:
+def _note_text(r, doc, namespace: Namespace = Namespace()) -> str:
     """The whole note, whichever of its chunks matched."""
-    keys = [f"{NOTE_PREFIX}{doc.note_id}:{n}" for n in range(int(_field(doc, "parts") or 1))]
+    keys = [f"{namespace.notes}{doc.note_id}:{n}" for n in range(int(_field(doc, "parts") or 1))]
     pipe = r.pipeline(transaction=False)
     for key in keys:
         pipe.hget(key, "content")
-    return f"title: {doc.heading}\n\n" + "\n\n".join(part for part in pipe.execute() if part)
+    parts = pipe.execute()
+    if any(part is None for part in parts):
+        raise RuntimeError(f"Note {doc.note_id} has missing chunks; retry after checking the stored records.")
+    separator = "" if _field(doc, "join_mode") == "exact" else "\n\n"
+    return f"title: {doc.heading}\n\n" + separator.join(parts)
 
 
 # --- Save --------------------------------------------------------------------------------------
 
-def note_chunks(content: str) -> list[str]:
-    """A note in pieces of at most MAX_CHARS, cut between paragraphs; headings stay in the text."""
-    pieces: list[str] = []
-    buf = ""
-    for para in re.split(r"\n\s*\n", content):
-        for _, _, piece in split_long(list(enumerate(para.splitlines(), 1))):
-            if buf and len(buf) + 2 + len(piece) > MAX_CHARS:
-                pieces.append(buf)
-                buf = ""
-            buf = f"{buf}\n\n{piece}" if buf else piece
-    if buf:
-        pieces.append(buf)
-    return pieces
+def note_chunks(content: str, model, title: str) -> list[str]:
+    """Exact slices of a note, including title tokens in each piece's budget."""
+    return [chunk.text for chunk in fit_chunks(model, "note", "", [Chunk(title, content, 1, 1)])]
 
 
 def save(title: str, content: str, directory: str, agent: str) -> str:
@@ -206,23 +217,22 @@ def save(title: str, content: str, directory: str, agent: str) -> str:
     project = project_of(directory)
     r = connect()
     model = embedding_model()
-    if not index_exists(r):
-        create_index(r, model_dimension(model))
-    check_model(r)
+    namespace = ensure_index(r, model_dimension(model))
 
-    pieces = note_chunks(content)
+    pieces = note_chunks(content, model, title)
     vectors = encode(model, [embedding_text("note", "", title, piece) for piece in pieces])
     now = time.time()
-    note_id = time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + "-" + secrets.token_hex(3)
+    note_id = time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + "-" + secrets.token_hex(8)
     worktree = git(directory, "rev-parse", "--show-toplevel")
     branch = git(directory, "branch", "--show-current")
-    pipe = r.pipeline(transaction=True)
+    records = []
     for n, (piece, vector) in enumerate(zip(pieces, vectors)):
-        pipe.hset(f"{NOTE_PREFIX}{note_id}:{n}", mapping={
+        records.append((f"{namespace.notes}{note_id}:{n}", {
             "kind": "note",
             "project": project,
             "note_id": note_id,
             "parts": len(pieces),
+            "join_mode": "exact",
             "heading": title,
             "content": piece,
             "source": f"note {note_id}",
@@ -231,8 +241,11 @@ def save(title: str, content: str, directory: str, agent: str) -> str:
             "branch": branch,
             "worktree": str(Path(worktree)) if worktree else directory,
             "embedding": vector.tobytes(),
-        })
-    pipe.execute()
+        }))
+    def queue(pipe):
+        for key, fields in records:
+            pipe.hset(key, mapping=fields)
+    mutate(r, namespace, queue)
     return f'Saved note {note_id} to the memory of project "{project}".'
 
 

@@ -2,7 +2,7 @@
 # Ports are bound to loopback only: there is no password, so nothing outside this machine may reach it.
 services:
   redis:
-    image: redis/redis-stack:latest
+    image: redis/redis-stack@sha256:5d5154123426693540ea6c1d9e638eae2bf2024879c839db6fcfdd7717e817c7
     container_name: project-memory-redis
     restart: unless-stopped
     # One container needs no network of its own; Docker's default bridge also avoids "all predefined

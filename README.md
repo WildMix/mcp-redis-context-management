@@ -24,6 +24,19 @@ Each entry carries a project name: the folder name of the repository's main chec
 of a repository therefore share one memory (`~/game`, `~/game-claude` and `~/game-codex` are all
 `game`). Outside git it's the directory's own name, and `MEMORY_PROJECT` overrides it.
 
+For repositories with the same folder name, assign different explicit IDs once in each repository:
+
+```sh
+git config --local project-memory.id team-one-api
+```
+
+The setting lives in the shared Git configuration, so linked worktrees use the same ID. It is read
+on every call; no server restart is needed. IDs accept 1–128 letters, digits, dots, underscores or
+hyphens and are normalized to lowercase. Precedence is `MEMORY_PROJECT`, then `project-memory.id`,
+then the existing folder-name default. Independent clones need the same ID configured separately
+if they should share memory. Changing an ID selects another project's memory; it does not move or
+delete existing notes. Import docs with the new ID if needed; old notes remain under their old name.
+
 The server works out the directory each call is about from:
 1. the tool's optional `workdir` argument (which the hook always passes);
 2. else the client's MCP roots;
@@ -41,6 +54,8 @@ The server works out the directory each call is about from:
 | `migrate_memory.py` | One-off import of existing Markdown; `--rebuild` re-embeds everything |
 | `hooks/stop_hook.py` | The Stop hook for Claude Code and Codex (standard library only); `--check DIR` says whether it acts in `DIR` |
 | `hook_directories.example.txt` | Template for `hook_directories.txt`, the directories where the hook is active |
+| `tests/` | Unit regressions, disposable Redis integration tests, and an optional real-model smoke test |
+| `requirements-lock.txt` | Complete dependency snapshot of the tested environment |
 
 ## 1. Start Redis
 
@@ -74,10 +89,15 @@ wsl -d Ubuntu --cd /mnt/c/path/to/mpc-redis-context-management -- docker compose
 
 ```sh
 python -m venv .venv
-.venv/Scripts/python -m pip install -r requirements.txt    # Windows; .venv/bin/python elsewhere
+.venv/Scripts/python -m pip install -r requirements-lock.txt    # Windows; .venv/bin/python elsewhere
 ```
 
 The first run downloads the model (about 90 MB, cached by Hugging Face).
+
+The dependency snapshot was tested with Python 3.14.5 on Windows. `requirements.txt` pins the direct
+dependencies and embedding runtime; `requirements-lock.txt` also pins their installed dependencies.
+The compose file pins the tested Redis Stack image by registry digest. Update these pins deliberately
+and run the regression and integration tests before distributing a new environment.
 
 ## 3. Register the server
 
@@ -160,7 +180,9 @@ clients may run hooks through Git Bash, PowerShell or cmd, and that form works i
 
 At the end of each turn it reads only the part of the transcript written since its previous run.
 - **When it asks.** It asks when that part changed the project's files and saved nothing to the
-  memory. "The project's files" means files in any worktree of the session's repository:
+  memory. A save counts only after a successful result for this project's directory. Failed calls,
+  tool discovery, mentions of the tool in JavaScript, and saves to other repositories do not suppress
+  the reminder. "The project's files" means files in any worktree of the session's repository:
   - edits from Claude's Edit/Write tools or Codex's patches;
   - shell commands that change files (`git commit`, `sed -i`, `>` redirects, `rm`, `Set-Content`,
     ...).
@@ -192,6 +214,53 @@ Without `--project`, files go to the project of the current directory. Re-runnin
 unchanged files are skipped, edited ones re-chunked, deleted ones dropped. Notes saved by agents are
 never touched. Identical paragraphs found in several worktrees show up once in search results, with
 the other copies listed.
+
+Git enumeration errors, timeouts, and filesystem traversal/read errors abort the scan before any
+pruning. Each changed file's old chunks, new chunks and fingerprint are updated in one Redis
+transaction. A failed transaction leaves the previous import intact. Deleted files' chunks and
+fingerprints are removed together as well.
+
+### Token-aware chunks and search diversity
+
+Both notes and documents are split using the loaded model's tokenizer. The budget includes special
+tokens and the title, filename and section path; no chunk's embedding input exceeds the model's
+sequence limit (256 tokens for the default model). The 1,000-character limit is an additional size
+cap, not an estimate of that token budget. Oversized titles or headings produce an explicit error
+so they can be shortened. New notes reconstruct exactly after trimming outer whitespace. Document pieces
+retain the original paragraph's source-line range, which can overlap across pieces. Markdown heading
+paths stay correct even when levels are skipped, such as `#` followed by `###`.
+
+Search starts with 30 nearest candidates and doubles that number while duplicates leave fewer than
+three distinct results. It stops when it has three results or exhausts the project's candidates.
+Copies are folded by embedded content and chunks of one note count as one result. First-time saves
+are synchronized across processes, so parallel agents can both initialize and save successfully.
+
+### Rebuilding safely
+
+```sh
+<python> migrate_memory.py --rebuild
+```
+
+Rebuilds load the model first, re-chunk stored text to its token budget, write a separate generation
+of records, and validate its index before switching the active memory in one Redis transaction.
+The original text and index remain available while preparation runs. A model, encoding or index
+validation failure leaves the active memory intact. Source Markdown files are not required.
+
+Every application write increments a revision. If notes or imports change during preparation, the
+rebuild aborts with a retry message instead of losing concurrent changes. Pause writers and rerun it.
+An operation that attempts to write into a retired generation also receives a retry message. Searches
+retry if a generation changes underneath them. After a successful switch, the old generation is
+removed; the public index name remains usable as a Redis search alias.
+
+Existing records remain readable without a rebuild. To fix embeddings of previously truncated text,
+run a rebuild; reimport source docs to recalculate old Markdown heading paths. **Before the first
+rebuild after upgrading, restart all MCP server processes** so every writer uses generation and
+revision checks. Avoid direct Redis edits during a rebuild because they bypass those checks.
+
+If the process is killed, or Redis becomes unreachable during cleanup, an unused staging or retired
+generation may remain. Inspect `HGETALL project_memory:meta` and `FT._LIST` before cleaning it up;
+never delete the active generation. Retained staging records do not participate in normal searches.
+Rebuilding temporarily needs space for both generations.
 
 ## 6. Verify the setup
 
@@ -340,11 +409,16 @@ them helps when you inspect the memory, delete a wrong note, or start over.
 
 | Key | What it holds | Written | Read |
 | --- | --- | --- | --- |
-| `project_memory:note:<note id>:<n>` | One piece of a note saved by an agent. Fields: title, text, project, agent, branch, worktree, time, and the text's embedding (vector). A long note is split into pieces of at most 1000 characters (the model reads no more), numbered `0, 1, ...`. The note id is the save time plus a random suffix, e.g. `20261010-184708-0fcaa8`. | By `save_to_project_memory`, once per note. Notes are never edited afterwards. | By every search, through the index. When one piece matches, all pieces are read so the whole note is shown. |
+| `project_memory:note:<note id>:<n>` | One piece of a note: title, text, project, agent, branch, worktree, time, and embedding. Pieces fit both the model's token budget and a 1000-character cap, numbered `0, 1, ...`. New notes carry `join_mode=exact`; older notes retain their original paragraph-joining behavior until rebuilt. | By `save_to_project_memory`, once per note; re-chunked by rebuild. | Search reads all pieces when one matches. |
 | `project_memory:doc:<file id>:<n>` | One paragraph-sized piece of an imported Markdown file. Fields: text, section path, source file, line range, project, embedding. The file id is a hash of the file's path. | By `migrate_memory.py`. A re-run replaces a file's pieces if the file changed since the last import, and deletes them if the file disappeared. | By every search, through the index. |
 | `project_memory:files` | One field per imported file: its path, mapped to a fingerprint of its content (and of the project and chunking settings). | By `migrate_memory.py`, after importing each file. | By `migrate_memory.py` only, to skip files that haven't changed. Delete this key to force a full re-import. |
-| `project_memory:meta` | The embedding model and vector size the index was built with. | When the index is created (by the first save or import), and again by `--rebuild`. | By every search and save. Vectors from different models can't be compared, so both refuse to run with another model. |
-| index `project_memory` | Not a key: RediSearch's index over every `note:` and `doc:` key. It covers the vector (HNSW, cosine), the project and kind tags, and the text. | Created by the first save or import; recreated by `--rebuild`. | By `search_project_memory`: a nearest-neighbour search limited to one project. |
+| `project_memory:meta` | Embedding model, vector size, active `generation`, and write `revision`. An absent/empty generation selects the original layout. | At initialization, each successful write, and rebuild cutover. | Search, saves, imports and rebuilds validate this metadata. |
+| index/alias `project_memory` | Initially the original physical index; after rebuilding, an alias of the active generation's physical index. It covers vectors, project and kind tags, and text. | Created by the first save or import; switched by rebuild. | Search and manual `FT.SEARCH`/`FT.INFO` commands. |
+
+After a rebuild, note/doc keys have the prefix `project_memory:generation:<generation>:` instead of
+`project_memory:`. The physical index is `project_memory:generation:<generation>:index`. The files
+and metadata keys keep their original names. `project_memory:initialize` is a short-lived Redis
+lock for initialization/cutover; its lease expires if the process dies.
 
 ### Inspecting and maintaining
 
@@ -360,8 +434,8 @@ docker exec -it project-memory-redis redis-cli
 | --- | --- |
 | Count a project's entries | `FT.SEARCH project_memory "@project:{game}" LIMIT 0 0` |
 | List its latest notes | `FT.SEARCH project_memory "@project:{game} @kind:{note}" RETURN 2 heading created SORTBY created DESC LIMIT 0 10` |
-| Read a note | `HGETALL project_memory:note:<note id>:0` (fields `content` and `heading`) |
-| Start over: delete everything | `FT.DROPINDEX project_memory DD` then `DEL project_memory:files project_memory:meta` |
+| Read a note | `HGETALL <active-prefix>:note:<note id>:0` (fields `content` and `heading`; see generation layout above) |
+| Find the active physical index | `FT.INFO project_memory` (`index_name`), and `HGETALL project_memory:meta` |
 
 In these queries, escape non-letter characters in project names: `@project:{my\-game}`. A note split
 into several pieces is listed once per piece.
@@ -369,8 +443,13 @@ into several pieces is listed once per piece.
 To delete one note (every piece), run this from the container's host shell:
 
 ```sh
-docker exec project-memory-redis sh -c "redis-cli --scan --pattern 'project_memory:note:<note id>:*' | xargs redis-cli DEL"
+docker exec project-memory-redis sh -c "redis-cli --scan --pattern '<active-prefix>:note:<note id>:*' | xargs redis-cli DEL"
 ```
+
+Replace `<active-prefix>` using the generation layout above. Manual edits bypass application revision
+tracking, so stop writers/rebuilds first. To start over, first export a backup, stop all clients, use
+`FT.INFO project_memory` to identify the active physical index, then drop that physical index with
+`DD` and delete `project_memory:files` and `project_memory:meta`. Check for unused generations too.
 
 ## Exporting the database and using it on another computer
 
@@ -475,6 +554,39 @@ records; reimporting does not automatically remove records pointing to the sende
 For a shared live database instead of independent copies, `REDIS_URL` can point to a team Redis
 Stack server. The supplied compose file binds only to localhost and has no password; remote use
 requires authentication, appropriate network access controls and transport protection.
+
+## Running the regression tests
+
+Unit tests need the pinned Python dependencies but no Redis or downloaded embedding model:
+
+```sh
+<python> -m unittest discover -s tests -v
+```
+
+To also run the Redis fault-injection, concurrency, generation-switch and retrieval tests, start
+the supplied container and set `MEMORY_RUN_INTEGRATION=1`. To include the actual embedding model and
+its tokenizer, also set `MEMORY_TEST_REAL_MODEL=1`. For example, in PowerShell:
+
+```powershell
+$env:MEMORY_RUN_INTEGRATION = '1'
+$env:MEMORY_TEST_REAL_MODEL = '1'
+.venv/Scripts/python -m unittest discover -s tests -v
+```
+
+On POSIX shells:
+
+```sh
+MEMORY_RUN_INTEGRATION=1 MEMORY_TEST_REAL_MODEL=1 .venv/bin/python -m unittest discover -s tests -v
+```
+
+Integration tests use `REDIS_URL` and create uniquely named `test_project_memory_<uuid>` indexes.
+They remove their indexes and keys afterward and never use the application's configured memory
+namespace. They fail if Redis is unavailable. Only the real-model test loads the embedding model;
+set `HF_HUB_OFFLINE=1` to require the local cache. Temporary filesystem fixtures are also removed.
+
+Coverage includes failed Git scans, interrupted document replacement, failed and concurrent rebuilds,
+legacy records, concurrent first saves, exact note reconstruction, token budgets, skipped Markdown
+heading levels, project IDs, search deduplication, and Claude/Codex save-result detection.
 
 ## Startup time and a Windows trap
 

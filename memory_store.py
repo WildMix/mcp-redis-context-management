@@ -12,7 +12,6 @@ back up (restart: unless-stopped in docker-compose.yml).
 """
 from __future__ import annotations
 
-import functools
 import os
 import re
 import subprocess
@@ -42,6 +41,32 @@ FILES_KEY = f"{INDEX_NAME}:files"    # imported file path -> digest of the index
 META_KEY = f"{INDEX_NAME}:meta"      # model and dimension the index was built with
 
 HERE = Path(__file__).resolve().parent
+
+
+@dataclass(frozen=True)
+class Namespace:
+    """An immutable generation of records. An empty generation reads the original layout."""
+    generation: str = ""
+
+    @property
+    def prefix(self) -> str:
+        return f"{INDEX_NAME}:generation:{self.generation}" if self.generation else INDEX_NAME
+
+    @property
+    def index(self) -> str:
+        return f"{self.prefix}:index" if self.generation else INDEX_NAME
+
+    @property
+    def notes(self) -> str:
+        return f"{self.prefix}:note:"
+
+    @property
+    def docs(self) -> str:
+        return f"{self.prefix}:doc:"
+
+
+def namespace_of(r) -> Namespace:
+    return Namespace(r.hget(META_KEY, "generation") or "")
 
 
 # --- Redis -------------------------------------------------------------------------------------
@@ -92,19 +117,22 @@ def _wsl_path(path: Path) -> str:
     return f"/mnt/{path.drive[0].lower()}{path.as_posix()[2:]}" if path.drive else path.as_posix()
 
 
-def index_exists(r: redis.Redis) -> bool:
+def index_exists(r: redis.Redis, name: str | None = None) -> bool:
     try:
-        r.ft(INDEX_NAME).info()
+        r.ft(name or INDEX_NAME).info()
         return True
     except redis.ResponseError as e:
         if "unknown command" in str(e).lower():
             raise RuntimeError(f"{REDIS_URL} has no search module (FT.* commands): run redis/redis-stack, "
                                f"see docker-compose.yml.") from e
-        return False
+        if "unknown index" in str(e).lower() or "no such index" in str(e).lower():
+            return False
+        raise
 
 
-def create_index(r: redis.Redis, dim: int) -> None:
-    r.ft(INDEX_NAME).create_index(
+def create_index(r: redis.Redis, dim: int, namespace: Namespace = Namespace()) -> None:
+    """Create an unpublished index. Call ensure_index for normal writes."""
+    r.ft(namespace.index).create_index(
         [
             TextField("content"),
             TextField("heading"),
@@ -114,9 +142,42 @@ def create_index(r: redis.Redis, dim: int) -> None:
             NumericField("created", sortable=True),
             VectorField("embedding", "HNSW", {"TYPE": "FLOAT32", "DIM": dim, "DISTANCE_METRIC": "COSINE"}),
         ],
-        definition=IndexDefinition(prefix=[NOTE_PREFIX, DOC_PREFIX], index_type=IndexType.HASH),
+        definition=IndexDefinition(prefix=[namespace.notes, namespace.docs], index_type=IndexType.HASH),
     )
-    r.hset(META_KEY, mapping={"model": MODEL_NAME, "dim": dim})
+
+
+def ensure_index(r, dim: int) -> Namespace:
+    """Serialize first-time initialization across processes, including model metadata."""
+    with r.lock(f"{INDEX_NAME}:initialize", timeout=30, blocking_timeout=30):
+        namespace = namespace_of(r)
+        check_model(r)
+        if not index_exists(r, namespace.index):
+            create_index(r, dim, namespace)
+            r.hset(META_KEY, mapping={"model": MODEL_NAME, "dim": dim,
+                                     "generation": namespace.generation, "revision": 0})
+        check_model(r)
+        if not r.hget(META_KEY, "model") or int(r.hget(META_KEY, "dim") or 0) != dim:
+            raise RuntimeError("Index metadata is missing or incompatible; run migrate_memory.py --rebuild.")
+        return namespace
+
+
+def mutate(r, namespace: Namespace, queue) -> None:
+    """Commit one mutation and its revision together; never write into a retired generation."""
+    for _ in range(8):
+        with r.pipeline(transaction=True) as pipe:
+            try:
+                pipe.watch(META_KEY)
+                if namespace_of(pipe) != namespace:
+                    raise RuntimeError("The memory was rebuilt during this operation; retry it.")
+                check_model(pipe)
+                pipe.multi()
+                queue(pipe)
+                pipe.hincrby(META_KEY, "revision", 1)
+                pipe.execute()
+                return
+            except redis.WatchError:
+                continue
+    raise RuntimeError("The memory is busy with other writers; retry this operation.")
 
 
 def check_model(r: redis.Redis) -> None:
@@ -163,17 +224,19 @@ def embedding_text(kind: str, source: str, heading: str, content: str) -> str:
 
 # --- Projects ----------------------------------------------------------------------------------
 
-def git(directory: Path | str, *args: str) -> str:
+def git(directory: Path | str, *args: str, strict: bool = False) -> str:
     """Output of a git command run in directory; "" outside a repository or without git.
     stdin is closed: in the MCP server it is the protocol pipe, and a child sharing it can deadlock."""
     try:
-        return subprocess.run(["git", "-C", str(directory), *args], capture_output=True, encoding="utf-8",
-                              stdin=subprocess.DEVNULL, check=True, timeout=10).stdout.strip()
-    except (OSError, subprocess.SubprocessError):
+        output = subprocess.run(["git", "-C", str(directory), *args], capture_output=True, encoding="utf-8",
+                                stdin=subprocess.DEVNULL, check=True, timeout=10).stdout
+        return output if "-z" in args else output.strip()
+    except (OSError, subprocess.SubprocessError) as e:
+        if strict:
+            raise RuntimeError(f"Git failed while scanning {directory}: {e}") from e
         return ""
 
 
-@functools.lru_cache(maxsize=64)
 def project_of(directory: str) -> str:
     """The memory a directory belongs to: its repository's main checkout folder name, so every worktree
     of a repository shares one memory; outside git, the folder's own name. MEMORY_PROJECT overrides it."""
@@ -181,6 +244,11 @@ def project_of(directory: str) -> str:
         return PROJECT_OVERRIDE.lower()
     common = git(directory, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if common:  # <main checkout>/.git, or a bare repository
+        configured = git(directory, "config", "--local", "--get", "project-memory.id")
+        if configured:
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", configured):
+                raise ValueError("project-memory.id must be 1-128 letters, digits, dots, underscores or hyphens.")
+            return configured.lower()
         common_dir = Path(common)
         name = common_dir.parent.name if common_dir.name == ".git" else common_dir.name.removesuffix(".git")
     else:
@@ -190,12 +258,11 @@ def project_of(directory: str) -> str:
 
 # --- Chunking ----------------------------------------------------------------------------------
 
-# all-MiniLM-L6-v2 reads at most 256 word pieces (about 1000 characters of English); longer text is
-# silently truncated, so no chunk may exceed MAX_CHARS. Paragraphs under MIN_CHARS carry too little
-# meaning on their own and are merged with a neighbour from the same section.
+# Character limits keep paragraphs manageable; fit_chunks enforces the actual model token limit,
+# including the filename/title/heading. Small paragraphs are merged within their section.
 MAX_CHARS = 1000
 MIN_CHARS = 300
-CHUNKER_VERSION = f"1:{MAX_CHARS}:{MIN_CHARS}"  # part of each imported file's digest: a change re-imports
+CHUNKER_VERSION = f"2:tokens:{MAX_CHARS}:{MIN_CHARS}"
 
 HEADING = re.compile(r"^ {0,3}(#{1,6})\s+(.+?)\s*#*\s*$")
 FENCE = re.compile(r"^(`{3,}|~{3,})")
@@ -221,13 +288,13 @@ def paragraphs(text: str) -> list[tuple[str, list[tuple[int, str]]]]:
             lines = [ln for ln in lines[1:end] if FRONT_MATTER_KEEP.match(ln[1])] + [(end + 1, "")] + lines[end + 1:]
 
     out: list[tuple[str, list[tuple[int, str]]]] = []
-    headings: list[str] = []
+    headings: list[tuple[int, str]] = []
     para: list[tuple[int, str]] = []
     fence = ""
 
     def flush() -> None:
         if para:
-            out.append((" > ".join(headings), para.copy()))
+            out.append((" > ".join(title for _, title in headings), para.copy()))
             para.clear()
 
     for no, line in lines:
@@ -243,7 +310,10 @@ def paragraphs(text: str) -> list[tuple[str, list[tuple[int, str]]]]:
             continue
         if m := HEADING.match(line):
             flush()
-            headings[len(m.group(1)) - 1:] = [m.group(2)]
+            level = len(m.group(1))
+            while headings and headings[-1][0] >= level:
+                headings.pop()
+            headings.append((level, m.group(2)))
             continue
         if not stripped or THEMATIC_BREAK.match(stripped):
             flush()
@@ -294,3 +364,39 @@ def chunk_markdown(text: str) -> list[Chunk]:
             else:
                 chunks.append(Chunk(heading, body, start, end))
     return chunks
+
+
+def fit_chunks(model, kind: str, source: str, chunks: list[Chunk]) -> list[Chunk]:
+    """Split without dropping characters; budget the exact text passed to the tokenizer.
+
+    Source ranges stay conservative when Markdown normalization removed blank lines. Oversized
+    titles/headings fail explicitly instead of silently hiding the entire body from embeddings.
+    """
+    def fits(heading: str, body: str) -> bool:
+        text = embedding_text(kind, source, heading, body)
+        prompt_name = getattr(model, "default_prompt_name", None)
+        if prompt_name:
+            text = model.prompts[prompt_name] + text
+        ids = model.tokenizer(text, add_special_tokens=True, truncation=False, verbose=False)["input_ids"]
+        return len(ids) <= model.max_seq_length
+
+    out: list[Chunk] = []
+    for chunk in chunks:
+        if not fits(chunk.heading, ""):
+            raise ValueError("A title or section path exceeds the embedding model's token limit; shorten it.")
+        remaining = chunk.text
+        while remaining:
+            end = min(len(remaining), MAX_CHARS)
+            # Halving gives a known-fitting prefix even for tokenizers whose token counts are
+            # not monotonic with character length. Verify every final piece independently.
+            while end and not fits(chunk.heading, remaining[:end]):
+                end //= 2
+            if not end:
+                raise ValueError("The title or section path leaves no token budget for content; shorten it.")
+            if end < len(remaining):
+                boundary = max(remaining.rfind("\n", 0, end), remaining.rfind(" ", 0, end))
+                if boundary > end // 2 and fits(chunk.heading, remaining[:boundary + 1]):
+                    end = boundary + 1
+            out.append(Chunk(chunk.heading, remaining[:end], chunk.start_line, chunk.end_line))
+            remaining = remaining[end:]
+    return out

@@ -164,18 +164,48 @@ def turn_activity(entries: list[dict], cwd: str, roots: list[str]) -> tuple[bool
     """(changed the project's files, saved to the memory) in these entries of a Claude Code or Codex
     transcript; cwd is the session's directory, roots the project's directories."""
     changed = saved = False
+    pending_saves: dict[str, dict] = {}
 
     def edits_project(paths: list[str], base: str) -> bool:  # an edit with no known path counts
         return not paths or any(_inside(_native(p, base), roots) for p in paths)
 
+    def save_here(arguments) -> bool:
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except ValueError:
+                return False
+        if not isinstance(arguments, dict):
+            return False
+        where = arguments.get("workdir") or cwd
+        return _inside(_native(where, cwd), roots)
+
+    def succeeded(result) -> bool:
+        if isinstance(result, dict):
+            if result.get("isError") or result.get("is_error") or result.get("error"):
+                return False
+            return any(succeeded(result.get(key)) for key in ("content", "structuredContent", "result", "text"))
+        if isinstance(result, list):
+            return any(succeeded(part) for part in result)
+        if isinstance(result, str):
+            return bool(re.fullmatch(r'Saved note [\w-]+ to the memory of project "[^"\n]+"\.', result.strip()))
+        return False
+
     for entry in entries:
         # Claude Code: assistant messages carry tool_use blocks
-        message = entry.get("message") if entry.get("type") == "assistant" else None
+        message = entry.get("message") if entry.get("type") in ("assistant", "user") else None
         for block in (message or {}).get("content") or []:
-            if not isinstance(block, dict) or block.get("type") != "tool_use":
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_result":
+                arguments = pending_saves.pop(block.get("tool_use_id", ""), None)
+                saved |= arguments is not None and save_here(arguments) and succeeded(block)
+                continue
+            if block.get("type") != "tool_use":
                 continue
             name, tool_input = block.get("name", ""), block.get("input") or {}
-            saved |= name.endswith(SAVE_TOOL)
+            if name.endswith(SAVE_TOOL) and block.get("id"):
+                pending_saves[block["id"]] = tool_input
             if name in EDIT_TOOLS:
                 path = tool_input.get("file_path") or tool_input.get("notebook_path")
                 changed |= edits_project([path] if path else [], cwd)
@@ -195,10 +225,21 @@ def turn_activity(entries: list[dict], cwd: str, roots: list[str]) -> tuple[bool
                 changed |= shell_changes_project(" ".join(command) if isinstance(command, list)
                                                  else str(command or ""), base, roots)
             elif kind == "McpToolCall":
-                saved |= item.get("tool") == SAVE_TOOL
-        # Codex code mode calls tools from JavaScript inside one custom tool call
-        if payload.get("type") == "custom_tool_call" and SAVE_TOOL in str(payload.get("input", "")):
-            saved = True
+                saved |= (item.get("tool") == SAVE_TOOL and item.get("status") == "completed"
+                          and save_here(item.get("arguments")) and succeeded(item.get("result")))
+        # Older Codex transcripts have function_call/output pairs. Code-mode MCP calls also emit
+        # McpToolCall events above; mentioning a tool name in JavaScript is never a successful save.
+        if payload.get("type") == "function_call" and payload.get("name", "").endswith(SAVE_TOOL):
+            pending_saves[payload.get("call_id", "")] = payload.get("arguments")
+        elif payload.get("type") == "function_call_output":
+            arguments = pending_saves.pop(payload.get("call_id", ""), None)
+            result = payload.get("output")
+            if isinstance(result, str):
+                try:
+                    result = json.loads(result)
+                except ValueError:
+                    pass
+            saved |= arguments is not None and save_here(arguments) and succeeded(result)
     return changed, saved
 
 
