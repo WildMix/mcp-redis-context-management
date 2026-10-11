@@ -1,0 +1,12 @@
+{
+  "interval_seconds": 900,
+  "poll_seconds": 5,
+  "retry_seconds": 60,
+  "client_process_names": ["codex.exe", "claude.exe"],
+  "projects": [
+    {
+      "project": "my-project",
+      "directories": ["~/my-project", "~/my-project-feature-worktree"]
+    }
+  ]
+}

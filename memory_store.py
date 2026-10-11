@@ -18,6 +18,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -41,6 +42,14 @@ FILES_KEY = f"{INDEX_NAME}:files"    # imported file path -> digest of the index
 META_KEY = f"{INDEX_NAME}:meta"      # model and dimension the index was built with
 
 HERE = Path(__file__).resolve().parent
+
+
+def utc_timestamp(value: float | None = None) -> str:
+    return datetime.fromtimestamp(time.time() if value is None else value, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def sync_status_key(project: str) -> str:
+    return f"{INDEX_NAME}:sync:{project}"
 
 
 @dataclass(frozen=True)

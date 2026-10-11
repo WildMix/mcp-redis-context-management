@@ -1,18 +1,18 @@
 # Project memory over MCP (Redis vector search)
 
 A long-term memory shared by every coding agent on a project. Claude Code, Codex, parallel sessions
-and every git worktree all read and write the same memory. Agents save notes on what they changed and
-why, and search them before starting work, instead of re-deriving earlier decisions.
+and every git worktree all read and write the same memory. A background synchronizer imports project
+documentation and saved agent context while Claude or Codex is open. Agents search that knowledge
+before starting work and can still save notes explicitly.
 
 - **`mcp_server.py`** serves MCP over stdio or a shared local HTTP connection, with two tools:
   - `search_project_memory(query)` returns the 3 entries of the current project most similar to the
     query.
   - `save_to_project_memory(title, content)` stores a note.
-- **`hooks/stop_hook.py`** asks for a memory review when an agent finishes a turn with edits,
-  and after automatic or manual compaction. The agent searches for duplicates and saves only new,
-  lasting project knowledge; ordinary edit logs and session summaries stay out of memory.
-- **`migrate_memory.py`** imports context written *before* the save tool existed (docs, handoffs,
-  older agent memory files). You need it once per project, not day to day.
+- **`sync_memory.py`** watches local Claude/Codex clients and synchronizes configured projects on
+  startup, every 15 minutes while a client is open, and once after the last client closes.
+- **`migrate_memory.py`** performs the incremental imports used by the synchronizer and can also be
+  run manually. `--agent-context` includes project-scoped Claude/Codex memories and summaries.
 
 Entries live in a Redis Stack vector index (RediSearch, HNSW, cosine). They are embedded locally with
 `sentence-transformers/all-MiniLM-L6-v2` (384 dimensions), so nothing leaves the machine.
@@ -37,7 +37,7 @@ if they should share memory. Changing an ID selects another project's memory; it
 delete existing notes. Import docs with the new ID if needed; old notes remain under their old name.
 
 The server works out the directory each call is about from:
-1. the tool's optional `workdir` argument (which the hook always passes);
+1. the tool's optional `workdir` argument;
 2. else the client's MCP roots;
 3. in **stdio mode only**, else its own working directory. Claude Code and Codex both start stdio servers in the session's
    directory, so one global registration serves every project.
@@ -57,12 +57,16 @@ would pin every client to one project; use repository-local `project-memory.id` 
 | `mcp_server.py` | The MCP server; `--query "..."` runs one search in the terminal |
 | `memory_store.py` | Shared by both scripts: settings, Redis connection, index schema, project names, chunking |
 | `migrate_memory.py` | One-off import of existing Markdown; `--rebuild` re-embeds everything |
-| `hooks/stop_hook.py` | Stop and post-compaction memory review for Claude Code and Codex (standard library only); `--check DIR` checks directory scope |
+| `agent_context.py` | Project-scoped Claude/Codex memory and summary extraction for `--agent-context` |
+| `sync_memory.py` | Lightweight client watcher, active synchronization worker, manual sync and status CLI |
+| `process_lock.py` | OS-backed locks shared by manual imports, rebuilds and background synchronization |
+| `scripts/install-sync-autostart.ps1` | Windows sign-in task for the client watcher |
+| `scripts/remove-memory-hooks.py` | Back up client configuration and remove only the retired memory hooks |
 | `scripts/install-redis-autostart.ps1` | Windows task installer for shared Redis startup at sign-in, or optionally boot |
 | `scripts/keep-redis-running.ps1` | Hidden task worker: start the existing Redis container and keep WSL alive |
 | `scripts/install-mcp-autostart.ps1` | Windows sign-in task installer for the shared HTTP MCP server |
 | `scripts/keep-mcp-running.ps1` | Hidden worker: keep one model loaded, log failures and restart the HTTP process |
-| `hook_directories.example.txt` | Template for `hook_directories.txt`, the directories where the hook is active |
+| `sync_projects.example.json` | Template for the local `sync_projects.json` project scope and timing settings |
 | `tests/` | Unit regressions, disposable Redis integration tests, and an optional real-model smoke test |
 | `requirements-lock.txt` | Complete dependency snapshot of the tested environment |
 
@@ -205,8 +209,7 @@ default_tools_approval_mode = "approve"
 These settings use the clients' documented Streamable HTTP transport:
 [Codex](https://learn.chatgpt.com/docs/extend/mcp),
 [Claude Code](https://code.claude.com/docs/en/mcp). Restart existing clients to pick up the change;
-old sessions may retain their stdio process until they exit. The tool names, permissions and hooks
-stay the same. The task installer does not rewrite client configuration.
+old sessions may retain their stdio process until they exit. The tool names and permissions stay the same. The task installer does not rewrite client configuration.
 
 Check the running service after warmup:
 
@@ -269,102 +272,94 @@ REDIS_WSL_DISTRO = "Ubuntu"
 
 Section 6 shows how to check that both clients reach the server.
 
-## 4. Turn on the hook
+## 4. Enable background synchronization
 
-List the directories where agents should be asked to save their changes:
-
-```sh
-cp hook_directories.example.txt hook_directories.txt   # then edit: one directory per line
-```
-
-The hook is installed once per client. Without a `hook_directories.txt` entry, a directory gets
-nothing from it, so it never runs in unrelated projects.
-
-**Claude Code**: in `~/.claude/settings.json`:
+Copy `sync_projects.example.json` to the ignored `sync_projects.json`. List explicit project IDs
+and their checkout directories; use the same IDs as the MCP server (`project-memory.id` or the
+main checkout folder name). Group all checkouts of one project in one entry. Linked worktrees are
+also discovered for agent-context extraction. The configured directories are scanned for docs;
+add each checkout whose docs should contribute. Do not put unrelated projects in the same entry.
 
 ```json
-"hooks": {
-  "SessionStart": [
-    { "matcher": "^compact$", "hooks": [ { "type": "command", "command": "<python> <repo>/hooks/stop_hook.py", "timeout": 30 } ] }
-  ],
-  "Stop": [
-    { "hooks": [ { "type": "command", "command": "<python> <repo>/hooks/stop_hook.py", "timeout": 30 } ] }
+{
+  "interval_seconds": 900,
+  "poll_seconds": 5,
+  "retry_seconds": 60,
+  "client_process_names": ["codex.exe", "claude.exe"],
+  "projects": [
+    { "project": "game", "directories": ["C:/projects/game", "C:/projects/game-feature"] }
   ]
 }
 ```
 
-**Codex**: in `~/.codex/hooks.json`, same format:
+Install the Windows sign-in watcher after setting up Redis:
 
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      { "matcher": "^compact$", "hooks": [ { "type": "command", "command": "<python> <repo>/hooks/stop_hook.py", "timeout": 30 } ] }
-    ],
-    "Stop": [
-      { "hooks": [ { "type": "command", "command": "<python> <repo>/hooks/stop_hook.py", "timeout": 30 } ] }
-    ]
-  }
-}
+```powershell
+.\scripts\install-sync-autostart.ps1
 ```
 
-Codex runs a new or changed hook only after you trust it: open `/hooks` in Codex once and approve
-it.
+The task `ProjectMemory-Sync` starts immediately and at sign-in, without administrator rights or a
+visible console. It polls native Windows client process names in the same Windows logon session.
+An open desktop app or CLI counts as active, including an idle conversation. It does not detect
+closing individual conversations inside a still-open app. The default poll interval gives about
+five seconds of detection latency; processes that open and close entirely between polls can be
+missed. WSL-only clients and older Node-only clients require another detector and are not currently
+covered. Process names can be adjusted in the configuration; avoid broad names such as `node.exe`.
 
-On Windows, write paths in hook commands with forward slashes and without quotes (`C:/...`). The
-clients may run hooks through Git Bash, PowerShell or cmd, and that form works in all three.
+The watcher itself uses only the standard library and loads no embedding model. When the first
+client is detected, it starts one worker. That worker imports all configured projects immediately,
+then every 15 minutes after each completed cycle. It performs a final import when the last client
+closes, even if less than 15 minutes have elapsed, then exits and releases its model. The lightweight
+watcher remains available for the next client. A client opening during the final import keeps the
+worker alive. The worker loads the embedding model only when changed documents need it and reuses
+it across projects and subsequent cycles; unchanged documents are not re-embedded.
 
-### What the hook does
+Failures are logged and retried after 60 seconds. A failed project does not prevent the others
+from synchronizing. A pending-final-scan marker survives worker crashes or sign-out; the next
+watcher startup retries it even if no client is open. Stopping the scheduled watcher also stops
+its worker, leaving that marker for recovery. Abrupt shutdown cannot guarantee a final import
+before power-off. Configure the existing Redis autostart task so Redis is available to the worker.
 
-At the end of each turn it reads only the part of the transcript written since its previous run.
-- **When it asks.** It asks when that part changed the project's files and saved nothing to the
-  memory. A save counts only after a successful result for this project's directory. Failed calls,
-  tool discovery, mentions of the tool in JavaScript, and saves to other repositories do not suppress
-  the reminder. "The project's files" means files in any worktree of the session's repository:
-  - edits from Claude's Edit/Write tools or Codex's patches;
-  - shell commands that change files (`git commit`, `sed -i`, `>` redirects, `rm`, `Set-Content`,
-    ...).
+Automatic runs use `--agent-context` with transcripts disabled. Optional `claude_home` and
+`codex_home` properties override the default agent storage locations. The configuration is re-read
+while watching and before each scan. A per-configuration worker lock prevents duplicate workers;
+a separate lock per Redis URL/index serializes manual imports, background imports and rebuilds
+on this machine. These OS locks are released if a process crashes. They do not coordinate separate
+computers using the same Redis database.
 
-  Edits to other repositories or to configuration elsewhere don't count. Neither does a command that
-  first moves to another directory (`cd`, `git -C`), or that only names paths outside the project.
-- **What it asks.** The hook keeps the turn going with one more instruction: decide whether the turn
-  taught something worth keeping. A save must be all of:
-  - **about this project**, not about other repositories, the agent's tools or this memory system;
-  - **new**, not already in the memory and not plain from the code, diff, commits or docs;
-  - **lasting**, such as a decision and its reasons, a rejected alternative, a constraint or a
-    gotcha.
+### Retire the old save hooks
 
-  When in doubt the agent replies "Nothing to save to project memory." The save tool's own
-  description states the same rule, so it also covers saves an agent makes without being asked.
-- **No loops.** The continuation ends with `stop_hook_active` set, which lets the turn finish.
-- **Never stuck.** Any error lets the turn finish too.
+Preview and remove only this repository's Stop/compaction hook registrations:
 
-### Memory review after compaction
+```powershell
+.venv/Scripts/python scripts/remove-memory-hooks.py
+.venv/Scripts/python scripts/remove-memory-hooks.py --apply
+```
 
-Both clients support `SessionStart` with `source: "compact"` after automatic compaction and manual
-`/compact`. The same script returns `hookSpecificOutput.additionalContext`, asking the continuing
-agent to review the summary already in its context. It uses the **same project/new/lasting criteria**
-as Stop, explicitly searches for duplicates before saving, and then resumes the active task. This
-also covers design discussions with no file edits. Ordinary startup, resume and clear events are
-ignored, and the configured directory list still applies.
+The removal script backs up `~/.codex/hooks.json` and `~/.claude/settings.json` before changing them,
+retaining unrelated hooks and settings. `hooks/stop_hook.py` is an inert compatibility file for
+clients that cached old registrations. It never reads transcripts, blocks a turn or requests a
+save. There are no new session or turn hooks. `save_to_project_memory` remains available for
+explicit notes; agents should record durable decisions and their reasons in project documentation
+so the synchronizer can discover them.
 
-The script does not write the raw summary into Redis, launch another model, or advance the Stop
-hook's transcript cursor. The agent performs the judgment and calls `save_to_project_memory` only
-for qualifying facts. If nothing qualifies, no note is saved. Manual compaction while idle may leave
-this review pending until the next model turn; it does not create an independent agent turn.
+### Check freshness
 
-`PreCompact` runs before the summary exists. `PostCompact` is unsuitable for delivering this review
-instruction: Claude exposes `compact_summary` there but provides no decision/context control, and
-Codex does not document a summary field there. `SessionStart(compact)` is the shared mechanism for
-injecting context after compaction. See the official
-[Codex hook reference](https://learn.chatgpt.com/docs/hooks#sessionstart) and
-[Claude Code hook reference](https://code.claude.com/docs/en/hooks#sessionstart).
+```powershell
+.venv/Scripts/python sync_memory.py --status
+.venv/Scripts/python sync_memory.py --once
+Get-ScheduledTask -TaskName ProjectMemory-Sync
+Get-Content "$env:LOCALAPPDATA\project-memory\sync.log" -Tail 20
+Get-Content "$env:LOCALAPPDATA\project-memory\sync-watch.log" -Tail 10
+```
 
-Restart existing clients after changing hook configuration. In Codex, approve the new SessionStart
-entry in `/hooks`; adding it does not automatically trust it. Installed versions checked for this
-setup were Codex CLI 0.162.1 (desktop-bundled CLI 0.137.0-alpha.4) and Claude Code 2.1.283.
+`--status` shows detected client PIDs and each project's last successful synchronization. The
+worker log includes import counts and failures; the watcher log records worker starts and exits.
+Both rotate. `--once` requests a manual sync using the configured scope, even without open clients;
+it fails with a lock message if the scheduled worker already owns that configuration. Direct
+`migrate_memory.py` remains available and is serialized against individual active imports.
 
-## 5. Import existing context (optional, once)
+## 5. Import or synchronize context manually
 
 Context written before the save tool existed can be imported in one go. Directories inside a git
 checkout contribute only the `.md` files git does not ignore.
@@ -382,6 +377,57 @@ Git enumeration errors, timeouts, and filesystem traversal/read errors abort the
 pruning. Each changed file's old chunks, new chunks and fingerprint are updated in one Redis
 transaction. A failed transaction leaves the previous import intact. Deleted files' chunks and
 fingerprints are removed together as well.
+
+### Include Claude and Codex context
+
+Add `--agent-context` to discover saved agent knowledge for the supplied project directories and
+their linked Git worktrees. Start with a preview; it lists source paths and sizes without connecting
+to Redis, loading the embedding model, or writing files:
+
+```powershell
+.venv/Scripts/python migrate_memory.py --project game C:/projects/game --agent-context --dry-run
+.venv/Scripts/python migrate_memory.py --project game C:/projects/game --agent-context
+```
+
+With no directories, `--agent-context` uses the current directory. The destination project still
+defaults to the current directory's project, as for a normal import; use `--project` when running
+from this tool's checkout to import another project. Supply other existing independent checkouts
+explicitly if they should be included; only linked worktrees are discovered automatically.
+Use the same set of project directories when refreshing an import.
+
+| Source | Imported by default with `--agent-context` |
+| --- | --- |
+| Each checkout's `.claude/` and `.codex/` | Markdown knowledge files, including Git-ignored ones; caches and plugins are skipped |
+| `~/.claude/projects/<project>/memory/` | Markdown memories, matched through session working directories or the encoded checkout path |
+| `~/.codex/memories/rollout_summaries/` | Markdown summaries whose `cwd` belongs to the project |
+| Codex `MEMORY.md` and `raw_memories.md` | Project-specific task groups and thread sections, not the complete files containing many projects |
+| Claude project JSONL and Codex `sessions/` / `archived_sessions/` JSONL | Readable compaction summaries associated with the project |
+
+Add `--include-transcripts` to also extract user and assistant conversation text. Tool calls,
+tool results, reasoning blocks, system/developer instructions, credentials/configuration files,
+and binary databases are not imported. This is text extraction, not an LLM distillation or a check
+that historical statements are still true. Encrypted compaction records cannot be recovered by
+this script. Unsupported layouts and global knowledge without project attribution remain out of
+the automatic import; project-specific Markdown in custom locations can still be supplied as an
+ordinary directory argument. Selected memories or messages can themselves contain sensitive text.
+
+Global agent data is matched to absolute checkout paths, not just project folder names. Ambiguous
+mixed-project sessions are skipped. Codex task groups are selected only when all their referenced
+rollout summaries belong to the selected project. Override storage locations with `--claude-home`
+and `--codex-home`; their defaults respect `CLAUDE_CONFIG_DIR` and `CODEX_HOME`, respectively.
+
+The extraction writes readable Markdown under this tool's ignored
+`.memory-imports/<project-hash>/` directory, with original source paths and summary/message line
+references. These files then use the existing chunking, embedding and incremental import process.
+Search citations point to the extracted Markdown; its source header links it back to the original
+agent file. No Claude or Codex source files are changed. Extraction reads finish before generated files or document records are changed; synchronization
+status records are updated when an attempt starts or fails. Invalid complete JSONL records abort; an unfinished final record in an
+active session is ignored until the next run.
+
+Re-running updates changed extracts and removes vanished extracts from the selected categories.
+An import without `--include-transcripts` preserves any previously imported transcripts. A normal
+docs-only import also leaves the extraction cache's database entries alone. Agent-saved notes are
+unaffected. Keep the cache local: it contains copies of the selected project context.
 
 ### Token-aware chunks and search diversity
 
@@ -428,7 +474,7 @@ Rebuilding temporarily needs space for both generations.
 ## 6. Verify the setup
 
 Go through these checks in order, since each relies on the ones before. `<project>` stands for a
-directory listed in `hook_directories.txt`.
+directory listed in `sync_projects.json`.
 
 **1. Redis is up.** With Docker in WSL, prefix the command with `wsl -d Ubuntu --`.
 
@@ -478,26 +524,11 @@ Expected: `Saved note <note id> to the memory of project "<name>".`, and the not
 search result: `note of <date> by claude-code` (or `codex-mcp-client`), with branch and worktree.
 Delete the note afterwards (see "Inspecting and maintaining").
 
-**6. The hook is set up for the directory.**
-
-```sh
-<python> <repo>/hooks/stop_hook.py --check <project>
-```
-
-Expected: `<project> is listed. After a turn that edits a file, the hook blocks the stop and tells
-the agent:`, followed by the instruction the agent will get. If it says `is not listed`,
-`hook_directories.txt` doesn't cover that directory. In Claude Code, `/hooks` should list the Stop
-hook. In Codex, `/hooks` should show it as trusted.
-
-**7. The hook fires in a real turn.** In a session in `<project>`, ask for a small real change, for
-example *"Create hook-check.txt containing 'ok'."* When the agent has done it:
-- **Claude Code** shows `Stop hook feedback` with the save instruction, then the agent calls
-  `save_to_project_memory`. Claude Code labels this a "blocking error", which is how it shows any
-  hook that keeps a turn going.
-- **Codex** keeps the turn going and the agent calls `save_to_project_memory`.
-
-Then delete `hook-check.txt` and the note. A turn that only reads files or runs read-only commands
-ends without a save request; that is by design.
+**6. Background synchronization is running.** Run `sync_memory.py --status`. While a native Claude
+or Codex client is open, the client PID list should be nonempty and configured projects should
+show `status: ok` after their initial imports. Edit a small project Markdown file and verify that
+the next periodic scan, or the final scan after closing all clients, updates its searchable text
+and the timestamps below. No agent turn should be interrupted for a memory review.
 
 ### Troubleshooting
 
@@ -509,12 +540,11 @@ ends without a save request; that is by design.
 | Searches show another project, or miss what you saved | Check the project named in the result header and pass the absolute project directory as `workdir`. Check repository-local `project-memory.id` if folder names collide. `MEMORY_PROJECT` is only supported for per-client stdio/CLI. |
 | Shared HTTP cannot connect | Check `ProjectMemory-MCP`, `/health` and the stderr log in section 3; allow startup warmup time. Restart clients after changing their transport or restarting the server. |
 | Shared HTTP asks for `workdir` | Pass the absolute existing project directory. The shared process cannot use its own directory as the client's project. |
-| The hook never asks | Check 6 says the directory is not listed; or Codex hasn't trusted the hook (`/hooks`); or the turn changed no files. |
-| After a real change the agent replies "Nothing to save to project memory." | It judged the change temporary, or it couldn't load the tool: check the server is connected (`/mcp`). |
+| Documents are stale | Check `sync_memory.py --status`, the project scope in `sync_projects.json`, and the sync logs. An `error` status preserves the previous success time. |
 
 ## Using it
 
-The hook makes sure agents save. Searching depends on the agent deciding to look things up. The
+The background job synchronizes project sources. Searching depends on the agent deciding to look things up. The
 tool's description and the server's instructions already tell agents to search before answering
 about design, past work or code they can't see. A guardrail in the project's own instruction files
 makes it stick, because agents read those at the start of every session. Put this in `AGENTS.md`
@@ -528,8 +558,9 @@ Use the shared `project-memory` MCP server:
 
 - Call `search_project_memory` before answering, planning or editing in an unfamiliar project area.
   Rephrase missed searches, read cited docs, and check historical notes against current code.
-- Call `save_to_project_memory` only for new, lasting project knowledge not already in memory,
-  code, commits or docs. Otherwise reply "Nothing to save to project memory."
+- Record lasting project decisions and their reasons in project documentation, which is
+  synchronized automatically. `save_to_project_memory` remains optional for lasting knowledge
+  missing from those sources; search for duplicates first. No end-of-turn review is required.
 
 See [README.md](README.md#using-it) for details.
 ```
@@ -556,6 +587,28 @@ From a terminal:
 | `MEMORY_PROJECT` | unset | pins every call to one project name |
 | `REDIS_WSL_DISTRO` | unset | WSL distro running Docker, held open while a process uses Redis |
 
+## Timestamps and synchronization status
+
+New or refreshed document chunks have UTC ISO-8601 fields `updated_at` (when that content was
+written to Redis) and `source_modified_at` (the imported file's modification time). For extracted
+agent context, the source file is the generated Markdown in `.memory-imports`. Unchanged content
+keeps its entry timestamp. New notes have `updated_at` equal to their save time; existing notes
+get that field backfilled from their original `created` time during a project sync. Rebuilds
+preserve these timestamps because re-embedding does not change the stored knowledge.
+
+Each project's `project_memory:sync:<project>` hash records `last_attempt_started_at`, `status`,
+`last_success_started_at`, `last_success_completed_at`, directory scope, and the latest successful
+file/chunk counts. A successful scan advances its success timestamps even when every file is
+unchanged: only this small status record is written. Failures retain the previous success times
+and set `status: error` with an error type; full diagnostics are in the log. Search results also
+show the last successful sync and returned documents' update times.
+
+The first import after this upgrade refreshes existing documents once to populate the new fields.
+Subsequent imports are incremental. Timestamps describe a scan interval and individual document
+updates, not a transactional snapshot of the entire repository: files can change during a scan,
+and an error can leave some files already updated. A file detected changing while it is read
+aborts that scan for retry. Git commits remain the way to identify an exact source revision.
+
 ## How the memory is stored
 
 Redis stores values under names called *keys*. Every entry of the memory is a Redis *hash* (a small
@@ -569,6 +622,7 @@ them helps when you inspect the memory, delete a wrong note, or start over.
 | `project_memory:note:<note id>:<n>` | One piece of a note: title, text, project, agent, branch, worktree, time, and embedding. Pieces fit both the model's token budget and a 1000-character cap, numbered `0, 1, ...`. New notes carry `join_mode=exact`; older notes retain their original paragraph-joining behavior until rebuilt. | By `save_to_project_memory`, once per note; re-chunked by rebuild. | Search reads all pieces when one matches. |
 | `project_memory:doc:<file id>:<n>` | One paragraph-sized piece of an imported Markdown file. Fields: text, section path, source file, line range, project, embedding. The file id is a hash of the file's path. | By `migrate_memory.py`. A re-run replaces a file's pieces if the file changed since the last import, and deletes them if the file disappeared. | By every search, through the index. |
 | `project_memory:files` | One field per imported file: its path, mapped to a fingerprint of its content (and of the project and chunking settings). | By `migrate_memory.py`, after importing each file. | By `migrate_memory.py` only, to skip files that haven't changed. Delete this key to force a full re-import. |
+| `project_memory:sync:<project>` | Latest attempt status and last successful scan timestamps/counts for one project. | By imports, including unchanged scans. | By `sync_memory.py --status` and MCP search. |
 | `project_memory:meta` | Embedding model, vector size, active `generation`, and write `revision`. An absent/empty generation selects the original layout. | At initialization, each successful write, and rebuild cutover. | Search, saves, imports and rebuilds validate this metadata. |
 | index/alias `project_memory` | Initially the original physical index; after rebuilding, an alias of the active generation's physical index. It covers vectors, project and kind tags, and text. | Created by the first save or import; switched by rebuild. | Search and manual `FT.SEARCH`/`FT.INFO` commands. |
 
@@ -690,8 +744,8 @@ restored data. See the [Redis persistence documentation](https://redis.io/docs/l
 
 ### Connect colleagues' agents to the restored memory
 
-Follow sections 2–4 to install Python dependencies, register the MCP server and configure the
-hooks. Keep the sender's `EMBEDDING_MODEL` and `MEMORY_INDEX`; the defaults work if the sender
+Follow sections 2–4 to install Python dependencies, register the MCP server and configure background
+synchronization. Keep the sender's `EMBEDDING_MODEL` and `MEMORY_INDEX`; the defaults work if the sender
 used the defaults. Use `REDIS_WSL_DISTRO=Ubuntu` only when Docker runs in that WSL distribution.
 The local connection remains `REDIS_URL=redis://localhost:6379/0`.
 
@@ -743,7 +797,8 @@ set `HF_HUB_OFFLINE=1` to require the local cache. Temporary filesystem fixtures
 
 Coverage includes failed Git scans, interrupted document replacement, failed and concurrent rebuilds,
 legacy records, concurrent first saves, exact note reconstruction, token budgets, skipped Markdown
-heading levels, project IDs, search deduplication, and Claude/Codex save-result detection. HTTP tests
+heading levels, project IDs, search deduplication, source timestamps, sync freshness, client lifecycle, worker retries,
+process locks, and selective removal of old hook registrations. HTTP tests
 also cover concurrent clients, project isolation, client roots, missing workdir, reconnects, shared
 model lifetime, and Host/Origin rejection. Real HTTP tests use the same real-model opt-in above.
 

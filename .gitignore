@@ -1,6 +1,8 @@
 .venv/
 __pycache__/
+.memory-imports/
 *.pyc
 .idea/
-# local: where the Stop hook is active (see hook_directories.example.txt)
+# Local synchronization scope and retired hook scope.
+sync_projects.json
 hook_directories.txt

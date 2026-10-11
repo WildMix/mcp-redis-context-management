@@ -4,8 +4,7 @@ agent (Claude Code, Codex, ...) and every worktree of a project, in a Redis Stac
 Tools:
 - search_project_memory(query): the 3 entries of this project most similar to the query (KNN over
   local sentence-transformers embeddings): notes saved by agents and imported docs.
-- save_to_project_memory(title, content): stores a note, embedded with the same model. The Stop hook
-  in hooks/ asks agents to call it at the end of a turn that changed files.
+- save_to_project_memory(title, content): optionally stores a note, embedded with the same model.
 
 A call is about the project of the directory the agent works in (see memory_store.project_of): the
 workdir argument if given, else the client's MCP roots. Only stdio falls back to the server's cwd.
@@ -35,7 +34,7 @@ from starlette.responses import JSONResponse
 
 from memory_store import (INDEX_NAME, PROJECT_OVERRIDE, Chunk, Namespace, check_model, connect, embedding_text, ensure_index,
                           encode, fit_chunks, git, hold_wsl_open, index_exists, load_model, model_dimension,
-                          mutate, namespace_of, project_of, tag)
+                          mutate, namespace_of, project_of, tag, utc_timestamp, sync_status_key)
 
 TOP_K = 3
 # Every worktree holds its own copy of the shared docs, so the nearest neighbours are often one
@@ -186,7 +185,7 @@ def _search(query: str, project: str, r, namespace: Namespace) -> str:
         knn = (Query(f"(@project:{{{tag(project)}}})=>[KNN {candidates} @embedding $vector AS distance]")
                .sort_by("distance")
                .return_fields("kind", "content", "heading", "source", "start_line", "end_line", "content_sha",
-                              "note_id", "parts", "join_mode", "created", "agent", "branch", "worktree", "distance")
+                              "note_id", "parts", "join_mode", "created", "updated_at", "source_modified_at", "agent", "branch", "worktree", "distance")
                .paging(0, candidates)
                .dialect(2))
         docs = r.ft(namespace.index).search(knn, query_params={"vector": vector.tobytes()}).docs
@@ -208,6 +207,8 @@ def _search(query: str, project: str, r, namespace: Namespace) -> str:
             parts.append(f"[{i}] {_describe_note(best)}  {similarity}\n{_note_text(r, best, namespace)}")
             continue
         lines = [f"[{i}] doc {best.source}:{best.start_line}-{best.end_line}  {similarity}"]
+        if _field(best, "updated_at"):
+            lines.append(f"updated in Redis: {best.updated_at}; source modified: {_field(best, 'source_modified_at') or 'unknown'}")
         if best.heading:
             lines.append(f"section: {best.heading}")
         if copies:
@@ -215,6 +216,9 @@ def _search(query: str, project: str, r, namespace: Namespace) -> str:
         parts.append("\n".join(lines) + "\n\n" + best.content)
     count = f"{len(groups)} closest entr{'y' if len(groups) == 1 else 'ies'}"
     header = f'{count} of project "{project}" for "{query}" (cosine similarity, 1.0 = same meaning):'
+    status = r.hgetall(sync_status_key(project))
+    if status.get("last_success_completed_at"):
+        header += f"\nLast successful document sync: {status['last_success_completed_at']} (latest attempt: {status.get('status', 'unknown')})."
     return header + "\n\n" + "\n\n---\n\n".join(parts)
 
 
@@ -277,6 +281,7 @@ def save(title: str, content: str, directory: str, agent: str) -> str:
             "content": piece,
             "source": f"note {note_id}",
             "created": int(now),
+            "updated_at": utc_timestamp(now),
             "agent": agent,
             "branch": branch,
             "worktree": str(Path(worktree)) if worktree else directory,

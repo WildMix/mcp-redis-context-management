@@ -1,5 +1,11 @@
 """Opt in with MEMORY_RUN_INTEGRATION=1; every test uses a disposable Redis index."""
 import os
+import contextlib
+import io
+import json
+import shutil
+import subprocess
+import time
 import sys
 import tempfile
 import threading
@@ -17,6 +23,7 @@ from mcp.client.stdio import stdio_client
 import memory_store as store
 import mcp_server as server
 import migrate_memory as migrate
+import agent_context as agents
 from tests.support import isolated_store, quiet_import, quiet_rebuild
 
 
@@ -85,6 +92,118 @@ class RedisTests(unittest.TestCase):
                 quiet_import(self.r, [self.root], self.project)
         self.assertEqual(self.documents(), old_docs)
         self.assertEqual(self.r.hgetall(store.FILES_KEY), old_files)
+
+    def test_timestamps_track_content_changes_and_survive_rebuild(self):
+        path = self.root / "design.md"
+        path.write_text("Original context.", encoding="utf-8")
+        self.save()
+        with patch.object(migrate, "utc_timestamp", return_value="2026-10-11T10:00:00.000Z"):
+            quiet_import(self.r, [self.root], self.project)
+        key = next(iter(self.documents()))
+        self.assertEqual(self.r.hget(key, "updated_at"), "2026-10-11T10:00:00.000Z")
+        with patch.object(migrate, "utc_timestamp", return_value="2026-10-11T11:00:00.000Z"):
+            quiet_import(self.r, [self.root], self.project)
+            self.assertEqual(self.r.hget(key, "updated_at"), "2026-10-11T10:00:00.000Z")
+            path.write_text("Revised context.", encoding="utf-8")
+            quiet_import(self.r, [self.root], self.project)
+        self.assertEqual(self.r.hget(key, "updated_at"), "2026-10-11T11:00:00.000Z")
+        quiet_rebuild(self.r)
+        key = next(iter(self.documents()))
+        self.assertEqual(self.r.hget(key, "updated_at"), "2026-10-11T11:00:00.000Z")
+        for key in self.r.scan_iter(match=store.namespace_of(self.r).notes + "*"):
+            self.assertTrue(self.r.hget(key, "updated_at").endswith("Z"))
+
+    def test_sync_status_advances_on_unchanged_scan_but_not_failure(self):
+        path = self.root / "design.md"
+        path.write_text("Context.", encoding="utf-8")
+        arguments = [str(self.root), "--project", self.project]
+        with patch.object(migrate, "connect", return_value=self.r), contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            with patch.object(migrate, "utc_timestamp", return_value="2026-10-11T10:00:00.000Z"):
+                self.assertEqual(migrate.main(arguments), 0)
+            key = store.sync_status_key(self.project)
+            with patch.object(migrate, "utc_timestamp", return_value="2026-10-11T11:00:00.000Z"), \
+                    patch.object(migrate, "load_model", side_effect=AssertionError("unchanged scan loaded model")):
+                self.assertEqual(migrate.main(arguments), 0)
+            self.assertEqual(self.r.hget(key, "last_success_completed_at"), "2026-10-11T11:00:00.000Z")
+            self.assertEqual(self.r.hget(key, "imported"), "0")
+            path.write_text("Changed context.", encoding="utf-8")
+            with patch.object(migrate, "load_model", side_effect=RuntimeError("failed")):
+                self.assertEqual(migrate.main(arguments), 1)
+            self.assertEqual(self.r.hget(key, "status"), "error")
+            self.assertEqual(self.r.hget(key, "last_success_completed_at"), "2026-10-11T11:00:00.000Z")
+
+    @unittest.skipUnless(os.name == "nt", "Windows native client lifecycle")
+    def test_worker_detects_real_client_exit_and_runs_final_import(self):
+        # A uniquely named loopback ping process represents a native client without affecting
+        # the user's actual Claude/Codex sessions. All Redis keys use the isolated test namespace.
+        client_path = self.root / "project-memory-test-client.exe"
+        shutil.copyfile(Path(os.environ["WINDIR"]) / "System32" / "ping.exe", client_path)
+        config = self.root / "sync.json"
+        config.write_text(json.dumps({"projects": [{"project": self.project, "directories": [str(self.root)]}],
+            "client_process_names": [client_path.name], "interval_seconds": 900, "poll_seconds": 1}), encoding="utf-8")
+        document = self.root / "context.md"
+        document.write_text("Initial context.", encoding="utf-8")
+        client = subprocess.Popen([str(client_path), "-t", "127.0.0.1"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        script = ("import sys; from pathlib import Path; import migrate_memory as m; import sync_memory as s; "
+                  "from tests.support import TinyModel; m.load_model=lambda:TinyModel(); "
+                  "m.AGENT_CACHE_ROOT=Path(sys.argv[1])/'.memory-imports'; "
+                  "sys.exit(s.main(['--worker','--config',sys.argv[2]]))")
+        environment = dict(os.environ, MEMORY_INDEX=store.INDEX_NAME, REDIS_URL=store.REDIS_URL,
+            LOCALAPPDATA=str(self.root / "local"), CODEX_HOME=str(self.root / "codex"),
+            CLAUDE_CONFIG_DIR=str(self.root / "claude"), MEMORY_PROJECT="")
+        worker = subprocess.Popen([sys.executable, "-c", script, str(self.root), str(config)], env=environment,
+                                  cwd=Path(__file__).resolve().parents[1], stdin=subprocess.DEVNULL,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        try:
+            deadline = time.monotonic() + 30
+            while self.r.hget(store.sync_status_key(self.project), "status") != "ok":
+                if worker.poll() is not None:
+                    self.fail(worker.stderr.read().decode())
+                self.assertLess(time.monotonic(), deadline, "initial sync did not finish")
+                time.sleep(0.1)
+            self.assertIn("Initial context.", self.documents().values())
+            document.write_text("Final context after a short session.", encoding="utf-8")
+            client.terminate()
+            client.wait(timeout=5)
+            try:
+                worker.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                log = self.root / "local" / "project-memory" / "sync.log"
+                self.fail("Worker did not finish its final scan:\n" + log.read_text(encoding="utf-8"))
+            self.assertEqual(worker.returncode, 0, worker.stderr.read().decode())
+            self.assertIn("Final context after a short session.", self.documents().values())
+            self.assertEqual(self.r.hget(store.sync_status_key(self.project), "status"), "ok")
+            states = list((self.root / "local" / "project-memory").glob("sync-state-*.json"))
+            self.assertEqual(len(states), 1)
+            self.assertFalse(json.loads(states[0].read_text())["pending_final"])
+        finally:
+            for process in (client, worker):
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=5)
+            worker.stderr.close()
+
+    def test_agent_exports_import_incrementally_and_prune_only_selected_categories(self):
+        self.save()
+        cache = self.root / ".memory-imports"
+        memory = agents.Extract(self.root / ".claude" / "MEMORY.md", "memories", "Agent decision.")
+        transcript = agents.Extract(self.root / "session.jsonl", "transcripts", "Older conversation.")
+        with patch.object(migrate, "AGENT_CACHE_ROOT", cache):
+            exports = agents.export([memory, transcript], cache / "project", True)
+            migrate.import_dirs(self.r, [self.root], self.project, literal_roots=tuple(exports))
+            self.assertTrue(any("Agent decision." in value for value in self.documents().values()))
+            self.assertTrue(any("Older conversation." in value for value in self.documents().values()))
+            with patch.object(migrate, "load_model", side_effect=AssertionError("unchanged import loaded model")):
+                migrate.import_dirs(self.r, [self.root], self.project, literal_roots=tuple(exports))
+                # A docs-only import must leave every cached category alone.
+                quiet_import(self.r, [self.root], self.project)
+            self.assertTrue(any("Older conversation." in value for value in self.documents().values()))
+            defaults = agents.export([], cache / "project")
+            migrate.import_dirs(self.r, [self.root], self.project, literal_roots=tuple(defaults))
+            self.assertFalse(any("Agent decision." in value for value in self.documents().values()))
+            self.assertTrue(any("Older conversation." in value for value in self.documents().values()))
+            self.assertIn("lasting storage decision", server.search("decision", str(self.root)))
 
     def test_git_scan_failure_preserves_existing_import(self):
         path = self.root / "design.md"
