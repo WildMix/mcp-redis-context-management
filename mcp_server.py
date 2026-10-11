@@ -1,4 +1,4 @@
-"""Stdio MCP server for the project memory: what agents changed, decided and found, shared by every
+"""MCP server for the project memory: what agents changed, decided and found, shared by every
 agent (Claude Code, Codex, ...) and every worktree of a project, in a Redis Stack vector index.
 
 Tools:
@@ -8,10 +8,10 @@ Tools:
   in hooks/ asks agents to call it at the end of a turn that changed files.
 
 A call is about the project of the directory the agent works in (see memory_store.project_of): the
-workdir argument if given, else the client's MCP roots, else this server's working directory, which
-Claude Code and Codex set to the session's.
+workdir argument if given, else the client's MCP roots. Only stdio falls back to the server's cwd.
 
     python mcp_server.py                  # serve MCP over stdin/stdout (what Claude Code and Codex launch)
+    python mcp_server.py --transport streamable-http  # one warm server on 127.0.0.1:8765/mcp
     python mcp_server.py --query "..."    # print one search to the terminal, to try it without a client
 """
 from __future__ import annotations
@@ -31,8 +31,9 @@ import anyio
 from mcp import types
 from mcp.server.fastmcp import Context, FastMCP
 from redis.commands.search.query import Query
+from starlette.responses import JSONResponse
 
-from memory_store import (INDEX_NAME, Chunk, Namespace, check_model, connect, embedding_text, ensure_index,
+from memory_store import (INDEX_NAME, PROJECT_OVERRIDE, Chunk, Namespace, check_model, connect, embedding_text, ensure_index,
                           encode, fit_chunks, git, hold_wsl_open, index_exists, load_model, model_dimension,
                           mutate, namespace_of, project_of, tag)
 
@@ -45,6 +46,10 @@ MAX_NOTE_CHARS = 6000
 
 _model = None
 _model_lock = threading.Lock()
+# SentenceTransformer/tokenizers may change internal state during encode/tokenization. Share the
+# model across clients, but serialize inference (including note chunk tokenization).
+_inference_lock = threading.Lock()
+_shared_http = False
 
 
 def embedding_model():
@@ -96,11 +101,36 @@ def _feed_stdin_without_pending_reads() -> None:
     sys.stdin = open(read_end, encoding="utf-8")  # FastMCP's stdio transport reads sys.stdin.buffer
 
 
+def _exit_with_parent(parent_pid: int) -> None:
+    """Task Scheduler can kill PowerShell without its hidden Python children. Watch the original
+    Windows process handle (not a reusable PID) and exit with it, even while the model is loading."""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    parent = kernel32.OpenProcess(0x00100000, False, parent_pid)  # SYNCHRONIZE
+    if not parent:
+        raise RuntimeError("The scheduled MCP worker has already exited or cannot be monitored.")
+
+    def watch():
+        result = kernel32.WaitForSingleObject(parent, 0xFFFFFFFF)  # INFINITE
+        kernel32.CloseHandle(parent)
+        os._exit(0 if result == 0 else 1)
+
+    threading.Thread(target=watch, name="worker-watch", daemon=True).start()
+
+
 mcp = FastMCP(
     "project-memory",
     log_level="WARNING",  # the root logger, to stderr: keeps per-request and model-loading INFO lines out
     # Clients show these instructions even when they defer the tools, so they carry the rule on their own.
-    instructions="CRITICAL: this server is the long-term memory of the project you are working in, shared by every "
+    instructions="Pass your absolute current project directory as workdir on every tool call. "
+                 "CRITICAL: this server is the long-term memory of the project you are working in, shared by every "
                  "agent and worktree: notes earlier sessions saved about what they changed and decided, plus the "
                  "project's docs and handoffs. Call search_project_memory WHENEVER the user asks about the "
                  "project's architecture, design, past sessions, decisions or an implementation that is not "
@@ -109,6 +139,14 @@ mcp = FastMCP(
                  "save_to_project_memory only new, lasting knowledge about this project (decisions and their "
                  "reasons, constraints, gotchas) that the code, commits and docs don't already show.",
 )
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health(request):
+    """Process/model readiness only; normal tool calls also check Redis availability."""
+    ready = _model is not None
+    return JSONResponse({"status": "ready" if ready else "loading", "model_loaded": ready,
+                         "pid": os.getpid()}, status_code=200 if ready else 503)
 
 
 # --- Search ------------------------------------------------------------------------------------
@@ -141,7 +179,8 @@ def search(query: str, directory: str) -> str:
 
 
 def _search(query: str, project: str, r, namespace: Namespace) -> str:
-    vector = encode(embedding_model(), [query])[0]
+    with _inference_lock:
+        vector = encode(embedding_model(), [query])[0]
     candidates = CANDIDATES
     while True:
         knn = (Query(f"(@project:{{{tag(project)}}})=>[KNN {candidates} @embedding $vector AS distance]")
@@ -219,8 +258,9 @@ def save(title: str, content: str, directory: str, agent: str) -> str:
     model = embedding_model()
     namespace = ensure_index(r, model_dimension(model))
 
-    pieces = note_chunks(content, model, title)
-    vectors = encode(model, [embedding_text("note", "", title, piece) for piece in pieces])
+    with _inference_lock:
+        pieces = note_chunks(content, model, title)
+        vectors = encode(model, [embedding_text("note", "", title, piece) for piece in pieces])
     now = time.time()
     note_id = time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + "-" + secrets.token_hex(8)
     worktree = git(directory, "rev-parse", "--show-toplevel")
@@ -252,19 +292,31 @@ def save(title: str, content: str, directory: str, agent: str) -> str:
 # --- Tools -------------------------------------------------------------------------------------
 
 async def _directory(ctx: Context, workdir: str) -> str:
-    """The directory whose project a call is about: workdir if given, else the client's first file root,
-    else this server's working directory (Claude Code and Codex start the server in the session's)."""
+    """Resolve each call independently; a shared server must never guess the client's project."""
     if workdir.strip():
+        if _shared_http and (not Path(workdir.strip()).is_absolute() or not Path(workdir.strip()).is_dir()):
+            raise ValueError("workdir must be an existing absolute project directory on this machine.")
         return workdir.strip()
+    directories = []
     if ctx.session.check_client_capability(types.ClientCapabilities(roots=types.RootsCapability())):
         try:
             with anyio.fail_after(3):
                 roots = (await ctx.session.list_roots()).roots
             for root in roots:
-                if str(root.uri).startswith("file:"):
-                    return url2pathname(urlparse(str(root.uri)).path)
+                uri = urlparse(str(root.uri))
+                if uri.scheme == "file" and uri.netloc in ("", "localhost"):
+                    directory = url2pathname(uri.path)
+                    if not _shared_http:
+                        return directory
+                    if Path(directory).is_absolute() and Path(directory).is_dir():
+                        directories.append(str(Path(directory).resolve()))
         except Exception:  # a client that declares roots but does not answer: fall back
             pass
+    if _shared_http:
+        if len(set(directories)) == 1:
+            return directories[0]
+        raise ValueError("Pass workdir with your absolute current project directory. The shared HTTP "
+                         "server needs an explicit workdir or exactly one valid local MCP root.")
     return os.getcwd()
 
 
@@ -286,7 +338,7 @@ async def search_project_memory(query: str, ctx: Context, workdir: str = "") -> 
 
     Args:
         query: the question or topic to look up
-        workdir: your current working directory; needed only if this server runs elsewhere
+        workdir: your absolute current project directory; always pass this with the shared HTTP server
     """
     directory = await _directory(ctx, workdir)
     return await anyio.to_thread.run_sync(search, query, directory)
@@ -309,7 +361,7 @@ async def save_to_project_memory(title: str, content: str, ctx: Context, workdir
     Args:
         title: one line naming what the note is about
         content: the note, in plain text or Markdown (at most 6000 characters)
-        workdir: your current working directory; needed only if this server runs elsewhere
+        workdir: your absolute current project directory; always pass this with the shared HTTP server
     """
     directory = await _directory(ctx, workdir)
     client = ctx.session.client_params.clientInfo if ctx.session.client_params else None
@@ -317,12 +369,38 @@ async def save_to_project_memory(title: str, content: str, ctx: Context, workdir
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Project-memory MCP server (stdio).")
+    global _shared_http
+    parser = argparse.ArgumentParser(description="Project-memory MCP server (stdio or shared local HTTP).")
     parser.add_argument("--query", help="print one search and exit instead of serving MCP")
     parser.add_argument("--workdir", default=os.getcwd(), help="directory whose project --query searches")
+    parser.add_argument("--transport", choices=["stdio", "streamable-http"], default="stdio")
+    parser.add_argument("--port", type=int, default=8765, help="local HTTP port (default: 8765)")
+    parser.add_argument("--parent-pid", type=int, help="Windows HTTP worker PID; exit when that process ends")
     args = parser.parse_args()
+    if not 1 <= args.port <= 65535:
+        parser.error("--port must be between 1 and 65535")
+    _shared_http = args.transport == "streamable-http"
+    if _shared_http and (args.query is not None or PROJECT_OVERRIDE):
+        parser.error("shared HTTP cannot use --query or MEMORY_PROJECT; use per-call workdir and repository IDs")
+    if args.parent_pid is not None:
+        if sys.platform != "win32" or not _shared_http or args.parent_pid <= 0:
+            parser.error("--parent-pid requires Windows HTTP mode and a positive worker PID")
+        _exit_with_parent(args.parent_pid)
     hold_wsl_open()  # WSL and Redis start up while the model loads
     if args.query is None:
+        if _shared_http:
+            # Warm both the model and its first inference before accepting clients. Failure exits
+            # the process so the sign-in worker can retry; never advertise a broken warm server.
+            started = time.monotonic()
+            with _inference_lock:
+                encode(embedding_model(), ["Project memory startup"])
+            check_model(connect())
+            mcp.settings.host = "127.0.0.1"
+            mcp.settings.port = args.port
+            print(f"Model ready in {time.monotonic() - started:.1f}s; serving "
+                  f"http://127.0.0.1:{args.port}/mcp (pid {os.getpid()})", flush=True)
+            mcp.run(transport="streamable-http")
+            return
         if sys.platform == "win32":
             _feed_stdin_without_pending_reads()
         threading.Thread(target=embedding_model, name="model-loader", daemon=True).start()

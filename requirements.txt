@@ -1,4 +1,4 @@
-# MCP server (stdio) — official Python SDK; FastMCP API of the 1.x line
+# MCP server (stdio / Streamable HTTP) — official Python SDK; FastMCP API of the 1.x line
 mcp==1.30.0
 
 # Redis client with the RediSearch (FT.*) command API

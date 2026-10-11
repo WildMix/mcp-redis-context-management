@@ -4,7 +4,7 @@ A long-term memory shared by every coding agent on a project. Claude Code, Codex
 and every git worktree all read and write the same memory. Agents save notes on what they changed and
 why, and search them before starting work, instead of re-deriving earlier decisions.
 
-- **`mcp_server.py`** is a stdio MCP server with two tools:
+- **`mcp_server.py`** serves MCP over stdio or a shared local HTTP connection, with two tools:
   - `search_project_memory(query)` returns the 3 entries of the current project most similar to the
     query.
   - `save_to_project_memory(title, content)` stores a note.
@@ -39,8 +39,14 @@ delete existing notes. Import docs with the new ID if needed; old notes remain u
 The server works out the directory each call is about from:
 1. the tool's optional `workdir` argument (which the hook always passes);
 2. else the client's MCP roots;
-3. else its own working directory. Claude Code and Codex both start stdio servers in the session's
+3. in **stdio mode only**, else its own working directory. Claude Code and Codex both start stdio servers in the session's
    directory, so one global registration serves every project.
+
+For shared HTTP, always pass the absolute current project directory as `workdir`. Without it, the
+server accepts exactly one existing local MCP root; missing or ambiguous roots produce an error.
+Relative and nonexistent directories are rejected. Each request is resolved independently, so
+concurrent sessions can work in different projects. Shared HTTP rejects `MEMORY_PROJECT`, since it
+would pin every client to one project; use repository-local `project-memory.id` instead.
 
 ## Files
 
@@ -54,6 +60,8 @@ The server works out the directory each call is about from:
 | `hooks/stop_hook.py` | Stop and post-compaction memory review for Claude Code and Codex (standard library only); `--check DIR` checks directory scope |
 | `scripts/install-redis-autostart.ps1` | Windows task installer for shared Redis startup at sign-in, or optionally boot |
 | `scripts/keep-redis-running.ps1` | Hidden task worker: start the existing Redis container and keep WSL alive |
+| `scripts/install-mcp-autostart.ps1` | Windows sign-in task installer for the shared HTTP MCP server |
+| `scripts/keep-mcp-running.ps1` | Hidden worker: keep one model loaded, log failures and restart the HTTP process |
 | `hook_directories.example.txt` | Template for `hook_directories.txt`, the directories where the hook is active |
 | `tests/` | Unit regressions, disposable Redis integration tests, and an optional real-model smoke test |
 | `requirements-lock.txt` | Complete dependency snapshot of the tested environment |
@@ -147,6 +155,87 @@ and run the regression and integration tests before distributing a new environme
 The examples use `<repo>` for this repository's absolute path, and `<python>` for its venv
 interpreter (`<repo>\.venv\Scripts\python.exe` on Windows, `<repo>/.venv/bin/python` elsewhere).
 Leave out `REDIS_WSL_DISTRO` when Docker runs natively.
+
+### Shared HTTP at sign-in (Windows)
+
+After installing the dependencies and Redis startup task above, install the MCP task:
+
+```powershell
+.\scripts\install-mcp-autostart.ps1 -Distro Ubuntu
+```
+
+This starts `ProjectMemory-MCP` immediately and at each sign-in, without administrator rights or a
+visible window. One Python process serves all clients at `http://127.0.0.1:8765/mcp`, keeping one
+embedding model in memory between sessions. It loads the model, runs a warmup embedding and checks
+Redis before accepting connections. Startup can take 5–30 seconds or longer on a cold machine;
+subsequent clients reuse the loaded model. Simultaneous model/tokenizer operations are serialized.
+The worker retries failed processes after 10 seconds; Task Scheduler also retries worker failures.
+The server monitors its worker's Windows process handle and exits when the worker stops, so stopping
+or replacing the task cannot leave its model process running and occupying the port.
+It runs on battery with no execution time limit. Keep the repository and virtual environment at
+the installed path; reinstall the task if they move. Use `-Distro ''` for native Docker.
+
+Use `-Port 8766` if port 8765 is already occupied, and use that same port in both clients. The host
+is fixed to `127.0.0.1`. The SDK's Host/Origin checks protect against DNS rebinding; there is no
+authentication between local processes. This is a trusted-machine service, not a network service.
+Environment settings such as `REDIS_URL`, `MEMORY_INDEX` and `EMBEDDING_MODEL` now belong to the
+scheduled server process, not the clients. Both transports use the same database by default.
+
+**Claude Code** (user scope):
+
+```sh
+claude mcp add --transport http --scope user project-memory http://127.0.0.1:8765/mcp
+```
+
+If that name already exists, back up `~/.claude.json`, remove only the previous registration with
+`claude mcp remove --scope user project-memory`, then add it again. Keep the tool permission entries
+in `~/.claude/settings.json` shown below.
+
+**Codex**: back up `~/.codex/config.toml` and replace the existing project-memory table, including
+its stdio `env` subtable, with:
+
+```toml
+[mcp_servers.project-memory]
+url = 'http://127.0.0.1:8765/mcp'
+startup_timeout_sec = 60
+tool_timeout_sec = 120
+default_tools_approval_mode = "approve"
+```
+
+These settings use the clients' documented Streamable HTTP transport:
+[Codex](https://learn.chatgpt.com/docs/extend/mcp),
+[Claude Code](https://code.claude.com/docs/en/mcp). Restart existing clients to pick up the change;
+old sessions may retain their stdio process until they exit. The tool names, permissions and hooks
+stay the same. The task installer does not rewrite client configuration.
+
+Check the running service after warmup:
+
+```powershell
+Get-ScheduledTask -TaskName ProjectMemory-MCP
+Invoke-RestMethod http://127.0.0.1:8765/health
+Get-Content "$env:LOCALAPPDATA\project-memory\mcp-autostart.log" -Tail 10
+Get-Content "$env:LOCALAPPDATA\project-memory\mcp-server.stderr.log" -Tail 20
+```
+
+`/health` returns `status: ready`, `model_loaded: true` and the shared process ID. It checks process
+and model readiness; actual searches/saves also check Redis. The stdout log records warmup time.
+Server stdout/stderr logs describe the current run; large logs rotate to `.previous` on restart.
+No health response during warmup is expected. If startup fails, inspect stderr and confirm the
+Redis task is running. The worker retries once its dependency or port problem is corrected.
+
+After updating server code or dependencies, rerun the installer to replace the running task and
+load the new code/model. A server restart closes its HTTP sessions; reconnect clients if needed.
+To disable automatic startup:
+
+```powershell
+Stop-ScheduledTask -TaskName ProjectMemory-MCP
+Unregister-ScheduledTask -TaskName ProjectMemory-MCP -Confirm:$false
+```
+
+Redis and its data remain available. To return to per-client processes, use the stdio configuration
+below and restart clients.
+
+### Per-client stdio (alternative)
 
 **Claude Code**: register at user scope, so every project and worktree gets the tools.
 
@@ -417,7 +506,9 @@ ends without a save request; that is by design.
 | Check 3 shows `✘ Failed to connect` | The client can't start the server. If check 2 works, the command or paths in the client's configuration are wrong. If check 2 fails too, its error says why (a missing package, Redis, ...). |
 | A tool answers `Redis is not reachable` | Start Redis (step 1). With Docker in WSL, set `REDIS_WSL_DISTRO` in the server's configuration. |
 | A tool answers `was built with ..., not ...` | The index was built with another embedding model. Set `EMBEDDING_MODEL` back, or run `migrate_memory.py --rebuild`. |
-| Searches show another project, or miss what you saved | Check the project named in the result header. If a client starts the server outside the project, the agent must pass `workdir` (the hook's instruction already does), or set `MEMORY_PROJECT`. |
+| Searches show another project, or miss what you saved | Check the project named in the result header and pass the absolute project directory as `workdir`. Check repository-local `project-memory.id` if folder names collide. `MEMORY_PROJECT` is only supported for per-client stdio/CLI. |
+| Shared HTTP cannot connect | Check `ProjectMemory-MCP`, `/health` and the stderr log in section 3; allow startup warmup time. Restart clients after changing their transport or restarting the server. |
+| Shared HTTP asks for `workdir` | Pass the absolute existing project directory. The shared process cannot use its own directory as the client's project. |
 | The hook never asks | Check 6 says the directory is not listed; or Codex hasn't trusted the hook (`/hooks`); or the turn changed no files. |
 | After a real change the agent replies "Nothing to save to project memory." | It judged the change temporary, or it couldn't load the tool: check the server is connected (`/mcp`). |
 
@@ -652,13 +743,18 @@ set `HF_HUB_OFFLINE=1` to require the local cache. Temporary filesystem fixtures
 
 Coverage includes failed Git scans, interrupted document replacement, failed and concurrent rebuilds,
 legacy records, concurrent first saves, exact note reconstruction, token budgets, skipped Markdown
-heading levels, project IDs, search deduplication, and Claude/Codex save-result detection.
+heading levels, project IDs, search deduplication, and Claude/Codex save-result detection. HTTP tests
+also cover concurrent clients, project isolation, client roots, missing workdir, reconnects, shared
+model lifetime, and Host/Origin rejection. Real HTTP tests use the same real-model opt-in above.
 
 ## Startup time and a Windows trap
 
-The server answers the MCP handshake in about a second, then loads the model in the background,
+In stdio mode, the server answers the MCP handshake in about a second, then loads the model in the background,
 which takes 5–30 s (mostly importing torch; slower on a cold start). The first search or save waits
 for it.
+
+Shared HTTP instead warms the model once at sign-in, before listening. New client sessions reuse
+that process and skip model loading; the first call after a sign-in still waits if warmup is unfinished.
 
 On Windows that background loading needs a workaround. While a read is pending on a pipe, every
 other operation on that pipe blocks, and scipy's Fortran runtime (pulled in through scikit-learn)
