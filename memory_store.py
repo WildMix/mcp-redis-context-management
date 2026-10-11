@@ -238,7 +238,8 @@ def git(directory: Path | str, *args: str, strict: bool = False) -> str:
     stdin is closed: in the MCP server it is the protocol pipe, and a child sharing it can deadlock."""
     try:
         output = subprocess.run(["git", "-C", str(directory), *args], capture_output=True, encoding="utf-8",
-                                stdin=subprocess.DEVNULL, check=True, timeout=10).stdout
+                                stdin=subprocess.DEVNULL, check=True, timeout=10,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
         return output if "-z" in args else output.strip()
     except (OSError, subprocess.SubprocessError) as e:
         if strict:

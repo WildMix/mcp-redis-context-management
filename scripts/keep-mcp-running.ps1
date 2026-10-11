@@ -3,7 +3,7 @@
 param([string]$Distro = 'Ubuntu', [ValidateRange(1, 65535)][int]$Port = 8765)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$python = Join-Path $repo '.venv\Scripts\python.exe'
+$python = Join-Path $repo '.venv\Scripts\pythonw.exe'
 $server = Join-Path $repo 'mcp_server.py'
 if (-not (Test-Path -LiteralPath $python)) { throw "Install the virtual environment first: $python" }
 $logDirectory = Join-Path $env:LOCALAPPDATA 'project-memory'
@@ -23,7 +23,8 @@ while ($true) {
     $process = $null
     try {
         Add-Content -LiteralPath $logPath -Value "$(Get-Date -Format o) Starting shared MCP on 127.0.0.1:$Port"
-        # A fresh hidden console has no pending stdin read (important for scipy on Windows).
+        # pythonw allocates no console, including during restarts. Explicit output handles
+        # retain diagnostics; stdin has no pending read (important for scipy on Windows).
         $process = Start-Process -FilePath $python -ArgumentList "-u `"$server`" --transport streamable-http --port $Port --parent-pid $PID" `
             -WorkingDirectory $repo -WindowStyle Hidden -PassThru `
             -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath

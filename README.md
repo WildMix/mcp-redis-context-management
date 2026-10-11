@@ -66,6 +66,7 @@ would pin every client to one project; use repository-local `project-memory.id` 
 | `scripts/keep-redis-running.ps1` | Hidden task worker: start the existing Redis container and keep WSL alive |
 | `scripts/install-mcp-autostart.ps1` | Windows sign-in task installer for the shared HTTP MCP server |
 | `scripts/keep-mcp-running.ps1` | Hidden worker: keep one model loaded, log failures and restart the HTTP process |
+| `scripts/run-hidden.py` | Console-free task launcher; owns the worker process tree and logs startup failures |
 | `sync_projects.example.json` | Template for the local `sync_projects.json` project scope and timing settings |
 | `tests/` | Unit regressions, disposable Redis integration tests, and an optional real-model smoke test |
 | `requirements-lock.txt` | Complete dependency snapshot of the tested environment |
@@ -102,7 +103,8 @@ wsl -d Ubuntu --cd /mnt/c/path/to/mpc-redis-context-management -- docker compose
 
 All projects and both MCP clients already use the same Redis database at `localhost:6379/0`.
 Project tags separate their memories. To keep that database ready before the first MCP call, install
-one background task after creating the Redis container with compose:
+one background task after creating the Redis container with compose and the Python virtual
+environment from section 2 (the task uses its `pythonw.exe` launcher):
 
 ```powershell
 .\scripts\install-redis-autostart.ps1 -Distro Ubuntu
@@ -123,7 +125,7 @@ Get-Content "$env:LOCALAPPDATA\project-memory\redis-autostart.log" -Tail 10
 ```
 
 `Running` and task result `267009` (`0x41301`, task still running) are expected. The log should say
-`Redis ready; keeping WSL alive`. No console window stays open. Keep `REDIS_WSL_DISTRO=Ubuntu` in
+`Redis ready; keeping WSL alive`. No console window opens. Keep `REDIS_WSL_DISTRO=Ubuntu` in
 the MCP configuration as a fallback if the task is unavailable. Keeping Redis up removes the WSL
 and database startup delay; each new stdio MCP process still loads its embedding model on first use.
 
@@ -803,6 +805,21 @@ also cover concurrent clients, project isolation, client roots, missing workdir,
 model lifetime, and Host/Origin rejection. Real HTTP tests use the same real-model opt-in above.
 
 ## Startup time and a Windows trap
+
+Windows startup tasks use `pythonw.exe`, which has no console. The Redis and MCP launchers start
+PowerShell with `CREATE_NO_WINDOW`; passing `-WindowStyle Hidden` to PowerShell alone can still
+flash a console before PowerShell processes its arguments. Git discovery commands also use
+`CREATE_NO_WINDOW`, including when the synchronizer runs from `pythonw.exe`. The MCP keeper
+launches its server with `pythonw.exe` and explicit output files. A Windows job object ties the
+launcher's descendants to its lifetime, so stopping or replacing a task cannot leave its worker
+running. These choices preserve interactive sign-in tasks and the existing WSL user account.
+
+Logs stay in `%LOCALAPPDATA%\project-memory`: `redis-autostart.log`, `mcp-autostart.log`,
+`mcp-server.stdout.log`, `mcp-server.stderr.log`, `sync-watch.log`, and `sync.log`.
+Early launcher/PowerShell errors go to `redis-launcher.log` or `mcp-launcher.log`.
+After updating an existing installation, rerun all three `install-*-autostart.ps1` scripts to
+replace the registered task actions and restart their processes; editing the installer alone
+does not change a task already registered with Windows.
 
 In stdio mode, the server answers the MCP handshake in about a second, then loads the model in the background,
 which takes 5–30 s (mostly importing torch; slower on a cold start). The first search or save waits

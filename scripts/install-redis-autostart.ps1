@@ -8,7 +8,14 @@ param(
 $ErrorActionPreference = 'Stop'
 $taskName = 'ProjectMemory-Redis'
 $worker = Join-Path $PSScriptRoot 'keep-redis-running.ps1'
+$repo = Split-Path -Parent $PSScriptRoot
+$python = Join-Path $repo '.venv\Scripts\pythonw.exe'
+$launcher = Join-Path $PSScriptRoot 'run-hidden.py'
+$launcherLog = Join-Path $env:LOCALAPPDATA 'project-memory\redis-launcher.log'
 if ($Distro -notmatch '^[A-Za-z0-9_.-]+$') { throw 'Use a WSL distribution name containing only letters, digits, dots, underscores or hyphens.' }
+foreach ($path in @($python, $launcher, $worker)) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing Redis startup prerequisite: $path" }
+}
 
 # Refuse to take over an unrelated task that happens to have the same name.
 $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
@@ -16,8 +23,9 @@ if ($existing -and $existing.Description -notlike 'Project memory Redis:*') {
     throw "The task $taskName already exists and is not owned by this installer."
 }
 
-$taskAction = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" `
-    -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$worker`" -Distro `"$Distro`""
+$taskAction = New-ScheduledTaskAction -Execute $python `
+    -Argument "`"$launcher`" --log `"$launcherLog`" `"$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe`" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$worker`" -Distro `"$Distro`"" `
+    -WorkingDirectory $repo
 if ($Mode -eq 'Boot') {
     # WSL distributions belong to their Windows user, so SYSTEM cannot use this Ubuntu install.
     # S4U runs as its owner before login without storing a password.
@@ -35,7 +43,7 @@ $definition = New-ScheduledTask -Action $taskAction -Trigger $taskTrigger -Princ
 # Registration failure leaves the previous task untouched.
 Register-ScheduledTask -TaskName $taskName -InputObject $definition -Force | Out-Null
 if ($existing -and $existing.State -eq 'Running') {
-    $oldWorkers = @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" |
+    $oldWorkers = @(Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe' OR Name = 'pythonw.exe'" |
         Where-Object { $_.CommandLine -and $_.CommandLine.Contains($worker) } |
         ForEach-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue })
     Stop-ScheduledTask -TaskName $taskName
