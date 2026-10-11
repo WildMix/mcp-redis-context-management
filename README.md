@@ -357,28 +357,20 @@ makes it stick, because agents read those at the start of every session. Put thi
 `mcp__project-memory__search_project_memory` and `mcp__project-memory__save_to_project_memory`.
 
 ```markdown
-## Project memory: search before you answer
+# Project memory
 
-This project has a shared long-term memory, the `project-memory` MCP server, which every agent and
-worktree reads and writes. It holds the notes earlier sessions saved about what they changed and
-decided, and the project's docs and handoffs.
+Use the shared `project-memory` MCP server:
 
-**Zero-guessing policy.** You do not hold all of this project's context. When you are asked about a
-design pattern, feature, past implementation, earlier session or decision that you don't
-immediately know, or can't see in the files you have open, you must not guess, and you must not
-answer that you lack context. First call `search_project_memory`, then answer from what it returns.
-If a search misses, rephrase it before concluding nothing is recorded. A note is history: check it
-against the current code, and when they disagree, the code wins.
+- Call `search_project_memory` before answering, planning or editing in an unfamiliar project area.
+  Rephrase missed searches, read cited docs, and check historical notes against current code.
+- Call `save_to_project_memory` only for new, lasting project knowledge not already in memory,
+  code, commits or docs. Otherwise reply "Nothing to save to project memory."
 
-**Saving.** Save with `save_to_project_memory` only knowledge about this project that is:
-- **new**: not already in the memory, and not plain from the code, commits or docs;
-- **lasting**: a decision and its reasons, a rejected alternative, a constraint, a gotcha, a
-  non-obvious cause, a known limitation or unfinished piece.
-
-Logs of edits, work on other repositories and work on your tools don't belong there. When a turn
-changes the project's files, the Stop hook asks you to make this check. If nothing qualifies, which
-is common, reply "Nothing to save to project memory."
+See [README.md](README.md#using-it) for details.
 ```
+
+Keep these instruction files short and limited to the MCP guidance above. Adjust the README link
+when copying the block into another project; keep detailed setup and usage instructions in docs.
 
 Commit both files on every branch agents work on: a session reads them from its own checkout. If
 they are identical everywhere, merges between branches stay conflict-free.
