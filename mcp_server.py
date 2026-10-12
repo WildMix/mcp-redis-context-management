@@ -31,6 +31,7 @@ from mcp import types
 from mcp.server.fastmcp import Context, FastMCP
 from redis.commands.search.query import Query
 from starlette.responses import JSONResponse
+from memory_routing import configured_router
 
 from memory_store import (INDEX_NAME, PROJECT_OVERRIDE, Chunk, Namespace, check_model, connect, embedding_text, ensure_index,
                           encode, fit_chunks, git, hold_wsl_open, index_exists, load_model, model_dimension,
@@ -49,6 +50,20 @@ _model_lock = threading.Lock()
 # model across clients, but serialize inference (including note chunk tokenization).
 _inference_lock = threading.Lock()
 _shared_http = False
+_router = None
+
+
+def destination(directory: str, *, writing: bool = False):
+    if _router is None:
+        project, client = project_of(directory), connect()
+    else:
+        target, project = _router.resolve(directory)
+        if writing and target.read_only:
+            raise ValueError("This corpus is read-only through MCP. Edit and publish its curated Markdown instead.")
+        client = _router.connect(target)
+    if writing and client.hget(f"{INDEX_NAME}:meta", "corpus_domain") == "work":
+        raise ValueError("This work corpus is read-only through MCP. Edit and publish its curated Markdown instead.")
+    return project, client
 
 
 def embedding_model():
@@ -158,8 +173,7 @@ def search(query: str, directory: str) -> str:
     query = query.strip()
     if not query:
         return "Empty query: ask a question or name a topic."
-    project = project_of(directory)
-    r = connect()
+    project, r = destination(directory)
     for _ in range(3):
         namespace = namespace_of(r)
         try:
@@ -257,8 +271,7 @@ def save(title: str, content: str, directory: str, agent: str) -> str:
     if len(content) > MAX_NOTE_CHARS:
         raise ValueError(f"The note has {len(content)} characters; condense it to what another agent needs "
                          f"to know, under {MAX_NOTE_CHARS}.")
-    project = project_of(directory)
-    r = connect()
+    project, r = destination(directory, writing=True)
     model = embedding_model()
     namespace = ensure_index(r, model_dimension(model))
 
@@ -334,12 +347,14 @@ async def search_project_memory(query: str, ctx: Context, workdir: str = "") -> 
 
     It searches the long-term memory of the project you are working in: notes other agents saved about
     what they changed and decided, and the project's docs (design notes, handoffs, earlier memory files).
-    Every worktree of a repository shares one memory, and results come from this project only.
+    Worktree routes share a memory. A configured shared corpus can include related repositories;
+    work and personal domains are isolated. Unmapped directories are rejected in routed mode.
 
     Ask in natural language ("how is authentication wired?", "why did the build move to clang?"). If a
     search misses, rephrase it (other words, the feature's or file's name) before concluding that nothing
     is recorded. Returns the 3 most similar entries and where each comes from: for a doc, open the file at
-    the given lines for the surrounding context; a note is history, so check it against the current code.
+    the given lines for the surrounding context; curated sources are portable paths relative to
+    the corpus bundle. A note is history, so check it against the current code.
 
     Args:
         query: the question or topic to look up
@@ -362,6 +377,7 @@ async def save_to_project_memory(title: str, content: str, ctx: Context, workdir
       cause, a known limitation or unfinished piece. A log of edits or of this session is not.
     When in doubt, don't save. Write the note to stand on its own for a reader who has not seen this
     conversation, and leave out secrets.
+    A read-only corpus rejects saves; propose an edit to its curated Markdown instead.
 
     Args:
         title: one line naming what the note is about
@@ -374,7 +390,7 @@ async def save_to_project_memory(title: str, content: str, ctx: Context, workdir
 
 
 def main() -> None:
-    global _shared_http
+    global _shared_http, _router
     parser = argparse.ArgumentParser(description="Project-memory MCP server (stdio or shared local HTTP).")
     parser.add_argument("--query", help="print one search and exit instead of serving MCP")
     parser.add_argument("--workdir", default=os.getcwd(), help="directory whose project --query searches")
@@ -387,6 +403,9 @@ def main() -> None:
     _shared_http = args.transport == "streamable-http"
     if _shared_http and (args.query is not None or PROJECT_OVERRIDE):
         parser.error("shared HTTP cannot use --query or MEMORY_PROJECT; use per-call workdir and repository IDs")
+    _router = configured_router()
+    if _router and PROJECT_OVERRIDE:
+        parser.error("MEMORY_ROUTES cannot be combined with MEMORY_PROJECT")
     if args.parent_pid is not None:
         if sys.platform != "win32" or not _shared_http or args.parent_pid <= 0:
             parser.error("--parent-pid requires Windows HTTP mode and a positive worker PID")
@@ -399,7 +418,11 @@ def main() -> None:
             started = time.monotonic()
             with _inference_lock:
                 encode(embedding_model(), ["Project memory startup"])
-            check_model(connect())
+            if _router:
+                for target in _router.targets.values():
+                    _router.connect(target)
+            else:
+                check_model(connect())
             mcp.settings.host = "127.0.0.1"
             mcp.settings.port = args.port
             print(f"Model ready in {time.monotonic() - started:.1f}s; serving "

@@ -12,6 +12,8 @@ $logPath = Join-Path $logDirectory 'mcp-autostart.log'
 $stdoutPath = Join-Path $logDirectory 'mcp-server.stdout.log'
 $stderrPath = Join-Path $logDirectory 'mcp-server.stderr.log'
 $env:REDIS_WSL_DISTRO = $Distro
+$routes = Join-Path $repo 'memory_routes.local.json'
+if (Test-Path -LiteralPath $routes) { $env:MEMORY_ROUTES = $routes }
 # This process serves all projects; a user-level override would silently pin all of them.
 if ($env:MEMORY_PROJECT) { throw 'Unset MEMORY_PROJECT before starting the shared MCP server.' }
 while ($true) {

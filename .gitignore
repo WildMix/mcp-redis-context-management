@@ -8,3 +8,12 @@ sync_projects.json
 hook_directories.txt
 # Local benchmark snapshots, downloaded models, vectors and detailed results.
 .embedding-benchmark/
+# Unimported migration context: keep work/personal exports local and out of automatic sync.
+/work/
+/personal/
+/.context-gathering/
+# Machine routing, private exports and deployment validation artifacts.
+/memory_routes.local.json
+/redis-containers.local.json
+/exports/
+/.migration/

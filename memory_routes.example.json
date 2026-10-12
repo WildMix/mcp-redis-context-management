@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "targets": {
+    "work": {"redis_url": "redis://127.0.0.1:6380/0", "domain": "work", "project": "platform", "read_only": true},
+    "personal": {"redis_url": "redis://127.0.0.1:6381/0", "domain": "personal", "read_only": false}
+  },
+  "routes": [
+    {"root": "C:/projects/work/application", "target": "work"},
+    {"root": "C:/projects/personal/game", "target": "personal", "project": "game"}
+  ]
+}

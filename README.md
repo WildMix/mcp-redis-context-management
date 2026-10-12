@@ -361,6 +361,24 @@ Both rotate. `--once` requests a manual sync using the configured scope, even wi
 it fails with a lock message if the scheduled worker already owns that configuration. Direct
 `migrate_memory.py` remains available and is serialized against individual active imports.
 
+These timestamps describe file synchronization, not verification of the claims in those files.
+The synchronizer does not regenerate a Markdown summary when underlying code changes. Before
+importing a gathered corpus, follow [Curated context and freshness](CONTEXT_CURATION.md): select
+durable knowledge, retain implementation dumps as evidence, and keep machine paths and revisions
+separate from embedded content. Work context explains shared architecture, technical behavior and
+source-checked run/test workflows; review it when the design or documented entry points change.
+Curated pages use one complete H2 topic per retrieval chunk. The offline
+[curated preview workflow](CONTEXT_CURATION.md#explicit-selection-and-offline-preview) checks an explicit
+reviewed-file selection with the production chunker and cached model tokenizer before any Redis import.
+It does not need per-commit summary regeneration. Personal context can use a separate,
+more automated maintenance policy. Portable source reconciliation and any future code-derived
+summary refresh are not implemented by the current sync job.
+
+For separate work/personal instances and reviewed, portable imports, use the
+[isolated migration workflow](CONTEXT_CURATION.md#publish-to-independent-instances). It includes
+explicit MCP routing, read-only work access and a ZIP exporter with a tested restore workflow.
+This is an alternative to the broad automatic source collector described above.
+
 ## 5. Import or synchronize context manually
 
 Context written before the save tool existed can be imported in one go. Directories inside a git

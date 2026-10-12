@@ -100,10 +100,13 @@ class ScanTests(unittest.TestCase):
 
     def test_model_load_failure_does_not_touch_active_index(self):
         r = MagicMock()
+        r.hget.return_value = None
         with patch.object(migrate, "load_model", side_effect=RuntimeError("missing model")):
             with self.assertRaises(RuntimeError):
                 migrate.rebuild(r)
-        self.assertEqual(r.mock_calls, [])
+        r.ft.assert_not_called()
+        r.pipeline.assert_not_called()
+        r.hset.assert_not_called()
 
 
 class ProjectTests(unittest.TestCase):

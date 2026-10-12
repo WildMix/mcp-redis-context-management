@@ -1,7 +1,17 @@
-# A hidden scheduled-task worker. Keep the existing WSL container and data volume; create neither.
+# A hidden scheduled-task worker. Keep existing WSL containers/volumes; create neither.
 [CmdletBinding()]
 param([string]$Distro = 'Ubuntu')
 $ErrorActionPreference = 'Stop'
+$repo = Split-Path -Parent $PSScriptRoot
+$containers = @('project-memory-redis')
+$containerConfig = Join-Path $repo 'redis-containers.local.json'
+if (Test-Path -LiteralPath $containerConfig) {
+    $containers = Get-Content -LiteralPath $containerConfig -Raw | ConvertFrom-Json
+}
+if (-not $containers.Count) { throw 'At least one Redis container is required.' }
+foreach ($container in $containers) {
+    if ($container -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]+$') { throw 'Invalid Redis container name.' }
+}
 if ($Distro -notmatch '^[A-Za-z0-9_.-]+$') { throw 'Invalid WSL distribution name.' }
 $logDirectory = Join-Path $env:LOCALAPPDATA 'project-memory'
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
@@ -19,16 +29,19 @@ until docker info >/dev/null 2>&1; do
     if [ "$attempt" -ge 60 ]; then echo 'Docker did not become ready within 60 seconds' >&2; exit 1; fi
     sleep 1
 done
-docker start project-memory-redis
+for container in __CONTAINERS__; do
+docker start "$container"
 attempt=0
-until docker exec project-memory-redis redis-cli ping | grep -q '^PONG'; do
+until docker exec "$container" redis-cli ping | grep -q '^PONG'; do
     attempt=$((attempt + 1))
     if [ "$attempt" -ge 60 ]; then echo 'Redis did not become ready within 60 seconds' >&2; exit 1; fi
     sleep 1
 done
 echo 'Redis ready; keeping WSL alive'
+done
 exec cat >/dev/null
 '@
+$linuxCommand = $linuxCommand.Replace('__CONTAINERS__', ($containers -join ' '))
 while ($true) {
     $keeper = New-Object System.Diagnostics.Process
     $keeperStarted = $false
