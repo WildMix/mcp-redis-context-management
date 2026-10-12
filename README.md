@@ -835,6 +835,82 @@ deadlock. So on Windows the server gives the transport a private pipe, fed by a 
 stdin only when `PeekNamedPipe` reports data waiting. No read is ever left pending on stdin. For the
 same reason, every subprocess the server starts gets `stdin=DEVNULL`.
 
+## Local embedding comparison (12 October 2026)
+
+The current corpus does not demonstrate a reason to replace MiniLM. A local comparison used a
+read-only snapshot of **4,238 records** from `bodhidharma` and this repository, representing
+**2,157 distinct embedding inputs**. Forty English questions covered twenty intents, each with
+direct and paraphrased wording, balanced equally between the two projects.
+
+| Model | Useful evidence in first 3 results | Query encoding median / p95 | Encode 2,157 unique chunks |
+| --- | ---: | ---: | ---: |
+| `sentence-transformers/all-MiniLM-L6-v2` | **34/40 (85%)** | **20.1 / 25.1 ms** | **95.3 s** |
+| `Snowflake/snowflake-arctic-embed-xs` | 33/40 (82.5%) | 20.6 / 25.9 ms | 103.2 s |
+| `BAAI/bge-small-en-v1.5` | 30/40 (75%) | 37.7 / 44.7 ms | 212.8 s |
+
+MiniLM found useful evidence for 17/20 direct and 17/20 paraphrased questions. Arctic scored
+17/20 and 16/20; BGE scored **19/20 direct but 11/20 paraphrased**. All three put useful evidence
+first for 23/40 questions. Arctic gained one top-three success over MiniLM and lost two; BGE
+gained three and lost seven. This small, assistant-authored and assistant-judged set does not
+establish general model superiority. In particular, MiniLM and Arctic are effectively tied here.
+For the current mix of natural-language project-memory requests, retain MiniLM unless a larger
+set of actual user queries establishes an improvement.
+
+Tests ran on an Intel Core i7-1270P with 32 GiB RAM, Windows, CPU PyTorch float32, and the
+runtime's default 12 inference threads. The same stored chunks, filename/title/heading prefixes,
+project filtering and duplicate/note grouping were used for every model. All inputs fit 256
+tokens. Arctic and BGE used their documented query-only instruction; documents had no instruction
+([Arctic usage](https://huggingface.co/Snowflake/snowflake-arctic-embed-xs#usage),
+[BGE usage](https://huggingface.co/BAAI/bge-small-en-v1.5#usage)).
+
+Quality uses exact cosine ranking over the frozen corpus. MiniLM's top three matched the live
+Redis HNSW results, in order, for **all 40 queries**; 43 sampled stored embeddings also matched
+the freshly encoded baseline within 7.5e-8 per component. The benchmark performs no Redis writes.
+The alternative models were evaluated offline; no alternative Redis index or production model
+configuration was installed.
+
+Questions and expected answers were defined before retrieval. All 206 pooled top-three
+candidate passages were then reviewed with model names and ranks hidden. Relevance means useful
+evidence for the central answer, not necessarily every requested detail; generic topic mentions
+and contradictory descriptions were rejected. For example, old instantaneous Stillness entry,
+natural-pitch ambience, and pre-fix wind descriptions can outrank current implementation notes.
+Changing the embedding model alone did not resolve this document-authority problem.
+
+Headline latency uses 200 warm single-query measurements per model, with randomized model order
+for each question and serial inference in one process. This final interleaved test was added
+because two earlier sequential passes showed timing drift. It measures encoding only, excluding
+MCP/HTTP and Redis round trips. Chunk throughput uses one batch-size-64 pass per model and excludes
+file discovery, chunk validation and Redis writes. Desktop load, power and temperature can change
+these times. This comparison does not cover multilingual queries, raw source-code retrieval,
+model-specific rechunking, quantization, or independent human judgments.
+
+Reviewable artifacts:
+
+- [Results, environment, model revisions and per-question outcomes](benchmarks/embedding-comparison-2026-10-12.json)
+- [Questions and expected answers](benchmarks/embedding_cases.json)
+- [Pooled relevance judgments](benchmarks/embedding_judgments.json)
+- [Read-only benchmark script](scripts/benchmark_embeddings.py)
+
+Raw corpus text, downloaded weights, vectors, timings and retrieved passages stay in the ignored
+`.embedding-benchmark/` directory. The snapshot hash in the report identifies this exact corpus.
+To repeat against a new snapshot, run the commands below, then review `review-pool.json` and update
+the relevance judgments before generating a new report. Existing judgments refer to the recorded
+snapshot and are not automatically valid for changed content.
+
+```powershell
+.venv/Scripts/python scripts/benchmark_embeddings.py snapshot
+.venv/Scripts/python scripts/benchmark_embeddings.py download
+.venv/Scripts/python scripts/benchmark_embeddings.py labels
+.venv/Scripts/python scripts/benchmark_embeddings.py run --model minilm
+.venv/Scripts/python scripts/benchmark_embeddings.py run --model arctic
+.venv/Scripts/python scripts/benchmark_embeddings.py run --model bge
+.venv/Scripts/python scripts/benchmark_embeddings.py pool
+.venv/Scripts/python scripts/benchmark_embeddings.py latency
+.venv/Scripts/python scripts/benchmark_embeddings.py validate
+# Review pooled evidence and update benchmarks/embedding_judgments.json, then:
+.venv/Scripts/python scripts/benchmark_embeddings.py report
+```
+
 ## Licences
 
 These are all fine for commercial use:

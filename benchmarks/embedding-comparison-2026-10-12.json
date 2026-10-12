@@ -1,0 +1,1299 @@
+{
+  "date": "2026-10-12T06:50:44.047Z",
+  "corpus_sha256": "32d1a4cca6229dad53041a7a65c30572ba7ee81ed88270581c51bca18ad8b439",
+  "corpus_revision": {
+    "model": "sentence-transformers/all-MiniLM-L6-v2",
+    "dim": "384",
+    "revision": "134"
+  },
+  "records": 4238,
+  "unique_embedding_inputs": 2157,
+  "projects": {
+    "mpc-redis-context-management": 158,
+    "bodhidharma": 4080
+  },
+  "environment": {
+    "device": "cpu",
+    "threads": 12,
+    "interop_threads": 12,
+    "torch": "2.14.1+cpu",
+    "sentence_transformers": "6.1.0",
+    "python": "3.14.5",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "hardware": {
+      "cpu": "12th Gen Intel(R) Core(TM) i7-1270P",
+      "physical_cores": 12,
+      "logical_processors": 16,
+      "ram_bytes": 34009374720
+    }
+  },
+  "methodology": [
+    "40 authored English queries: 20 intents, each with direct and paraphrased wording; 20 queries per project.",
+    "Questions and expected answers defined before model retrieval; pooled top-three passages reviewed without model names or ranks.",
+    "Binary relevance means a passage supplies useful, non-contradictory evidence for the intended answer, not necessarily every requested detail.",
+    "Same frozen chunks and title/filename/heading prefixes; all inputs fit 256 tokens. No model-specific rechunking.",
+    "Normalized float32 PyTorch CPU embeddings; no quantization. Model-prescribed query instruction for Arctic and BGE only.",
+    "Exact cosine ranking within each project, folding identical content and note chunks as in production. Note relevance considers the full returned note.",
+    "Warm single-query encoding first measured in two sequential passes with reversed model order. Timing drift prompted a final randomized interleaved run: five rounds of 40 queries per model, all models resident, serial inference. Headline latency uses this interleaved run.",
+    "Batch encoding throughput measured once per model on 2,157 unique existing chunks, batch_size 64; excludes token-budget validation, Redis writes and file discovery.",
+    "Timing covers embedding and optional in-memory ranking, not MCP/HTTP or Redis round trips."
+  ],
+  "limitations": [
+    "Small author-judged diagnostic set, not a held-out user-query log; paired paraphrases are not independent intents.",
+    "Balanced project weighting is not an observed distribution of user traffic.",
+    "Pooled relevance judgments cover the first three results only; do not use them for Recall@10 or exhaustive recall.",
+    "One laptop under ordinary desktop conditions; latency and one-pass throughput may vary with power, temperature and background work.",
+    "English only; no multilingual or raw source-code retrieval evaluation.",
+    "Alternative Redis HNSW indexes were not built. The baseline was checked against the live HNSW index."
+  ],
+  "models": {
+    "minilm": {
+      "model": "sentence-transformers/all-MiniLM-L6-v2",
+      "queries": 40,
+      "hits_at_1": 23,
+      "hits_at_3": 34,
+      "mrr_at_3": 0.7041666666666667,
+      "by_project": {
+        "bodhidharma": {
+          "queries": 20,
+          "hits_at_1": 13,
+          "hits_at_3": 18,
+          "mrr_at_3": 0.7583333333333333
+        },
+        "mpc-redis-context-management": {
+          "queries": 20,
+          "hits_at_1": 10,
+          "hits_at_3": 16,
+          "mrr_at_3": 0.65
+        }
+      },
+      "by_style": {
+        "direct": {
+          "queries": 20,
+          "hits_at_1": 13,
+          "hits_at_3": 17,
+          "mrr_at_3": 0.7416666666666667
+        },
+        "paraphrased": {
+          "queries": 20,
+          "hits_at_1": 10,
+          "hits_at_3": 17,
+          "mrr_at_3": 0.6666666666666667
+        }
+      },
+      "encode_ms": {
+        "p50": 20.076349999999998,
+        "p95": 25.094954999999977
+      },
+      "sequential_pass_local_search_ms": {
+        "p50": 15.965150000000001,
+        "p95": 22.170015
+      },
+      "timing_samples": 200,
+      "timing_method": "interleaved",
+      "encode_p50_by_pass_ms": [
+        13.39865,
+        18.643700000000003
+      ],
+      "index_seconds": 95.29086929999994,
+      "texts_per_second": 22.635956790458216,
+      "parameters": 22713216,
+      "revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+      "cached_model_load_seconds": 0.4349569999999403,
+      "evaluated_queries": [
+        {
+          "id": "m01d",
+          "intent": "m01",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m01p",
+          "intent": "m01",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": 2
+        },
+        {
+          "id": "m02d",
+          "intent": "m02",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 2
+        },
+        {
+          "id": "m02p",
+          "intent": "m02",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": 2
+        },
+        {
+          "id": "m03d",
+          "intent": "m03",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m03p",
+          "intent": "m03",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": null
+        },
+        {
+          "id": "m04d",
+          "intent": "m04",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 2
+        },
+        {
+          "id": "m04p",
+          "intent": "m04",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m05d",
+          "intent": "m05",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": null
+        },
+        {
+          "id": "m05p",
+          "intent": "m05",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": null
+        },
+        {
+          "id": "m06d",
+          "intent": "m06",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": null
+        },
+        {
+          "id": "m06p",
+          "intent": "m06",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m07d",
+          "intent": "m07",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m07p",
+          "intent": "m07",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m08d",
+          "intent": "m08",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m08p",
+          "intent": "m08",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": 2
+        },
+        {
+          "id": "m09d",
+          "intent": "m09",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m09p",
+          "intent": "m09",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m10d",
+          "intent": "m10",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m10p",
+          "intent": "m10",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": 2
+        },
+        {
+          "id": "g01d",
+          "intent": "g01",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g01p",
+          "intent": "g01",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g02d",
+          "intent": "g02",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 2
+        },
+        {
+          "id": "g02p",
+          "intent": "g02",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 3
+        },
+        {
+          "id": "g03d",
+          "intent": "g03",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g03p",
+          "intent": "g03",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g04d",
+          "intent": "g04",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 3
+        },
+        {
+          "id": "g04p",
+          "intent": "g04",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g05d",
+          "intent": "g05",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g05p",
+          "intent": "g05",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g06d",
+          "intent": "g06",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": null
+        },
+        {
+          "id": "g06p",
+          "intent": "g06",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 2
+        },
+        {
+          "id": "g07d",
+          "intent": "g07",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g07p",
+          "intent": "g07",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g08d",
+          "intent": "g08",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g08p",
+          "intent": "g08",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": null
+        },
+        {
+          "id": "g09d",
+          "intent": "g09",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g09p",
+          "intent": "g09",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g10d",
+          "intent": "g10",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g10p",
+          "intent": "g10",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 2
+        }
+      ]
+    },
+    "arctic": {
+      "model": "Snowflake/snowflake-arctic-embed-xs",
+      "queries": 40,
+      "hits_at_1": 23,
+      "hits_at_3": 33,
+      "mrr_at_3": 0.6833333333333333,
+      "by_project": {
+        "bodhidharma": {
+          "queries": 20,
+          "hits_at_1": 14,
+          "hits_at_3": 18,
+          "mrr_at_3": 0.7833333333333333
+        },
+        "mpc-redis-context-management": {
+          "queries": 20,
+          "hits_at_1": 9,
+          "hits_at_3": 15,
+          "mrr_at_3": 0.5833333333333333
+        }
+      },
+      "by_style": {
+        "direct": {
+          "queries": 20,
+          "hits_at_1": 15,
+          "hits_at_3": 17,
+          "mrr_at_3": 0.7833333333333333
+        },
+        "paraphrased": {
+          "queries": 20,
+          "hits_at_1": 8,
+          "hits_at_3": 16,
+          "mrr_at_3": 0.5833333333333333
+        }
+      },
+      "encode_ms": {
+        "p50": 20.5987,
+        "p95": 25.915789999999998
+      },
+      "sequential_pass_local_search_ms": {
+        "p50": 19.811700000000002,
+        "p95": 29.127559999999985
+      },
+      "timing_samples": 200,
+      "timing_method": "interleaved",
+      "encode_p50_by_pass_ms": [
+        15.25765,
+        21.48675
+      ],
+      "index_seconds": 103.21504080000022,
+      "texts_per_second": 20.898117011643862,
+      "parameters": 22565376,
+      "revision": "d8c86521100d3556476a063fc2342036d45c106f",
+      "cached_model_load_seconds": 0.3653257000000849,
+      "evaluated_queries": [
+        {
+          "id": "m01d",
+          "intent": "m01",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m01p",
+          "intent": "m01",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": 3
+        },
+        {
+          "id": "m02d",
+          "intent": "m02",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m02p",
+          "intent": "m02",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": 2
+        },
+        {
+          "id": "m03d",
+          "intent": "m03",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m03p",
+          "intent": "m03",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": null
+        },
+        {
+          "id": "m04d",
+          "intent": "m04",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 3
+        },
+        {
+          "id": "m04p",
+          "intent": "m04",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": 2
+        },
+        {
+          "id": "m05d",
+          "intent": "m05",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": null
+        },
+        {
+          "id": "m05p",
+          "intent": "m05",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": null
+        },
+        {
+          "id": "m06d",
+          "intent": "m06",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": null
+        },
+        {
+          "id": "m06p",
+          "intent": "m06",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m07d",
+          "intent": "m07",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m07p",
+          "intent": "m07",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m08d",
+          "intent": "m08",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m08p",
+          "intent": "m08",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": null
+        },
+        {
+          "id": "m09d",
+          "intent": "m09",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m09p",
+          "intent": "m09",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": 2
+        },
+        {
+          "id": "m10d",
+          "intent": "m10",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m10p",
+          "intent": "m10",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": 2
+        },
+        {
+          "id": "g01d",
+          "intent": "g01",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g01p",
+          "intent": "g01",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g02d",
+          "intent": "g02",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g02p",
+          "intent": "g02",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g03d",
+          "intent": "g03",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g03p",
+          "intent": "g03",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": null
+        },
+        {
+          "id": "g04d",
+          "intent": "g04",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 3
+        },
+        {
+          "id": "g04p",
+          "intent": "g04",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g05d",
+          "intent": "g05",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g05p",
+          "intent": "g05",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g06d",
+          "intent": "g06",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": null
+        },
+        {
+          "id": "g06p",
+          "intent": "g06",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 2
+        },
+        {
+          "id": "g07d",
+          "intent": "g07",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g07p",
+          "intent": "g07",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 2
+        },
+        {
+          "id": "g08d",
+          "intent": "g08",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g08p",
+          "intent": "g08",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g09d",
+          "intent": "g09",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g09p",
+          "intent": "g09",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 3
+        },
+        {
+          "id": "g10d",
+          "intent": "g10",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g10p",
+          "intent": "g10",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 1
+        }
+      ]
+    },
+    "bge": {
+      "model": "BAAI/bge-small-en-v1.5",
+      "queries": 40,
+      "hits_at_1": 23,
+      "hits_at_3": 30,
+      "mrr_at_3": 0.6583333333333333,
+      "by_project": {
+        "bodhidharma": {
+          "queries": 20,
+          "hits_at_1": 13,
+          "hits_at_3": 16,
+          "mrr_at_3": 0.725
+        },
+        "mpc-redis-context-management": {
+          "queries": 20,
+          "hits_at_1": 10,
+          "hits_at_3": 14,
+          "mrr_at_3": 0.5916666666666667
+        }
+      },
+      "by_style": {
+        "direct": {
+          "queries": 20,
+          "hits_at_1": 16,
+          "hits_at_3": 19,
+          "mrr_at_3": 0.875
+        },
+        "paraphrased": {
+          "queries": 20,
+          "hits_at_1": 7,
+          "hits_at_3": 11,
+          "mrr_at_3": 0.4416666666666667
+        }
+      },
+      "encode_ms": {
+        "p50": 37.687200000000004,
+        "p95": 44.675615
+      },
+      "sequential_pass_local_search_ms": {
+        "p50": 54.8947,
+        "p95": 135.61052999999998
+      },
+      "timing_samples": 200,
+      "timing_method": "interleaved",
+      "encode_p50_by_pass_ms": [
+        71.04554999999999,
+        47.4946
+      ],
+      "index_seconds": 212.83050679999997,
+      "texts_per_second": 10.134825276843255,
+      "parameters": 33360000,
+      "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+      "cached_model_load_seconds": 0.4576350000002094,
+      "evaluated_queries": [
+        {
+          "id": "m01d",
+          "intent": "m01",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m01p",
+          "intent": "m01",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": 3
+        },
+        {
+          "id": "m02d",
+          "intent": "m02",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m02p",
+          "intent": "m02",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": null
+        },
+        {
+          "id": "m03d",
+          "intent": "m03",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m03p",
+          "intent": "m03",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": null
+        },
+        {
+          "id": "m04d",
+          "intent": "m04",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 2
+        },
+        {
+          "id": "m04p",
+          "intent": "m04",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": null
+        },
+        {
+          "id": "m05d",
+          "intent": "m05",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 2
+        },
+        {
+          "id": "m05p",
+          "intent": "m05",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": null
+        },
+        {
+          "id": "m06d",
+          "intent": "m06",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 2
+        },
+        {
+          "id": "m06p",
+          "intent": "m06",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m07d",
+          "intent": "m07",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m07p",
+          "intent": "m07",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m08d",
+          "intent": "m08",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m08p",
+          "intent": "m08",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": null
+        },
+        {
+          "id": "m09d",
+          "intent": "m09",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m09p",
+          "intent": "m09",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m10d",
+          "intent": "m10",
+          "style": "direct",
+          "project": "mpc-redis-context-management",
+          "rank": 1
+        },
+        {
+          "id": "m10p",
+          "intent": "m10",
+          "style": "paraphrased",
+          "project": "mpc-redis-context-management",
+          "rank": null
+        },
+        {
+          "id": "g01d",
+          "intent": "g01",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g01p",
+          "intent": "g01",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g02d",
+          "intent": "g02",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g02p",
+          "intent": "g02",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": null
+        },
+        {
+          "id": "g03d",
+          "intent": "g03",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g03p",
+          "intent": "g03",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": null
+        },
+        {
+          "id": "g04d",
+          "intent": "g04",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g04p",
+          "intent": "g04",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g05d",
+          "intent": "g05",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g05p",
+          "intent": "g05",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g06d",
+          "intent": "g06",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": null
+        },
+        {
+          "id": "g06p",
+          "intent": "g06",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 2
+        },
+        {
+          "id": "g07d",
+          "intent": "g07",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g07p",
+          "intent": "g07",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 2
+        },
+        {
+          "id": "g08d",
+          "intent": "g08",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g08p",
+          "intent": "g08",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 2
+        },
+        {
+          "id": "g09d",
+          "intent": "g09",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g09p",
+          "intent": "g09",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": null
+        },
+        {
+          "id": "g10d",
+          "intent": "g10",
+          "style": "direct",
+          "project": "bodhidharma",
+          "rank": 1
+        },
+        {
+          "id": "g10p",
+          "intent": "g10",
+          "style": "paraphrased",
+          "project": "bodhidharma",
+          "rank": 1
+        }
+      ]
+    }
+  },
+  "paired_comparison": {
+    "arctic": {
+      "new_top3_hits_vs_minilm": [
+        "g08p"
+      ],
+      "lost_top3_hits_vs_minilm": [
+        "m08p",
+        "g03p"
+      ]
+    },
+    "bge": {
+      "new_top3_hits_vs_minilm": [
+        "m05d",
+        "m06d",
+        "g08p"
+      ],
+      "lost_top3_hits_vs_minilm": [
+        "m02p",
+        "m04p",
+        "m08p",
+        "m10p",
+        "g02p",
+        "g03p",
+        "g09p"
+      ]
+    }
+  },
+  "baseline_validation": {
+    "query_checks": [
+      {
+        "id": "m01d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "m01p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "m02d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "m02p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "m03d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "m03p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "m04d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "m04p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "m05d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "m05p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "m06d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "m06p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "m07d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "m07p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "m08d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "m08p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "m09d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "m09p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "m10d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "m10p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g01d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g01p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g02d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g02p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g03d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g03p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g04d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g04p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g05d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g05p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g06d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g06p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g07d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g07p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g08d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g08p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g09d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g09p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g10d",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      },
+      {
+        "id": "g10p",
+        "same_top3_order": true,
+        "top3_overlap": 3
+      }
+    ],
+    "same_top3_order": 40,
+    "queries": 40,
+    "stored_vector_samples": 43,
+    "max_component_difference": 7.450580596923828e-08,
+    "live_metadata_unchanged": true
+  },
+  "sources": {
+    "arctic_query_format": "https://huggingface.co/Snowflake/snowflake-arctic-embed-xs",
+    "bge_query_format": "https://huggingface.co/BAAI/bge-small-en-v1.5"
+  }
+}

@@ -6,3 +6,5 @@ __pycache__/
 # Local synchronization scope and retired hook scope.
 sync_projects.json
 hook_directories.txt
+# Local benchmark snapshots, downloaded models, vectors and detailed results.
+.embedding-benchmark/

@@ -1,0 +1,674 @@
+{
+  "m01": {
+    "answer": "Set repository-local project-memory.id to distinguish repositories with the same directory name.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Accept answer-bearing passages; a passage need not supply every sub-detail of the question.",
+    "relevant_groups": [
+      "111a8a674e94bca2cc210da75ca3731e8ee5d55e",
+      "20261011-124909-784e02",
+      "8af29ef90aaedcef6b3a2c04e086bef54211434b"
+    ],
+    "irrelevant_groups": [
+      "2807e5947b9349776c9dd474b78a2247290ea281",
+      "e89016d70b4f3e3ee70f700ca227e51e7dd7b27c"
+    ],
+    "relevant_record_ids": [
+      2856,
+      4236,
+      2855
+    ],
+    "irrelevant_record_ids": [
+      2896,
+      2882
+    ]
+  },
+  "m02": {
+    "answer": "Shared HTTP calls must pass an absolute existing workdir, or supply exactly one valid MCP root.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Accept answer-bearing passages; a passage need not supply every sub-detail of the question.",
+    "relevant_groups": [
+      "3c3fd09e7f80566079bab08b97ec40131885f39b",
+      "cf9adb9138c4d2299e31dbdeda55194986057cff",
+      "e0f8379588500d64f32c0e2b61dfb8ad75d4d66b"
+    ],
+    "irrelevant_groups": [
+      "428864f7c740639fd70aad0c22eead63697cc812",
+      "52aa630d53d9e6a8820c142ff508f9e77178a012",
+      "8192984cfd7afbcccea3565d4e6d66225d74c2c1",
+      "8af29ef90aaedcef6b3a2c04e086bef54211434b",
+      "943617165d8fe6a498da8be8debf4f9c8642c27c",
+      "a1075482480c04c7ab8f60f87ca8462a7f76205e",
+      "d306860ef6bdbe4ecf3bdb0015333055691f4316"
+    ],
+    "relevant_record_ids": [
+      2857,
+      2858,
+      2912
+    ],
+    "irrelevant_record_ids": [
+      2853,
+      2876,
+      3764,
+      2855,
+      2914,
+      2854,
+      2872
+    ]
+  },
+  "m03": {
+    "answer": "Synchronization runs on client startup, periodically while active, and once after the last client closes.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Accept answer-bearing passages; a passage need not supply every sub-detail of the question.",
+    "relevant_groups": [
+      "0f8848a25b1f036f3ffe33ae178b13f48f73446b",
+      "4f259b761ecc5ed680b0aad98e83855f12b2e1aa",
+      "a0c899c7d798205d8dc86636389171914a41f80e",
+      "a1075482480c04c7ab8f60f87ca8462a7f76205e"
+    ],
+    "irrelevant_groups": [
+      "20261011-124909-784e02",
+      "428864f7c740639fd70aad0c22eead63697cc812",
+      "6692b3735c453eca551e5806699c5666bc39812f",
+      "8192984cfd7afbcccea3565d4e6d66225d74c2c1",
+      "b0de4633595e3a1b6de4959c88ef2122803f0e2a",
+      "da17c80eb8fadf58e2c91c527c1cce163e2ea1d7",
+      "fc15b8723e5746540df6321283176d64eb56c574"
+    ],
+    "relevant_record_ids": [
+      2909,
+      4,
+      3187,
+      2854
+    ],
+    "irrelevant_record_ids": [
+      4235,
+      2853,
+      2888,
+      3764,
+      2,
+      2917,
+      2889
+    ]
+  },
+  "m04": {
+    "answer": "Incremental imports skip unchanged files, replace changed chunks, and remove chunks for deleted files.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Accept answer-bearing passages; a passage need not supply every sub-detail of the question.",
+    "relevant_groups": [
+      "48c8a86498dbd98bcb918427f8b712d2d499aba3",
+      "90602b4ad0fb98698aac04e386efa2c13b8a6280",
+      "9b5cfbe50db0489e5306ef0a12d9cafeea1ef0f4",
+      "ab0a4d3a7ed8a7efaefe82119a5e0aa2236d4def",
+      "ceef7fd3ea24afa33353bf661ce127c58efb06e4"
+    ],
+    "irrelevant_groups": [
+      "20261011-124909-784e02",
+      "5387da547032a097fdbad34b9a5ec96a7e6c136a",
+      "9ff302f18d615aa70de07d78f2e2e8b700e71d7d",
+      "a13e18b168d748f307e46bd97bb1b7339f7ec55b",
+      "a8a6ffd7748599c962f6edccfb366a3f37aa4931",
+      "da17c80eb8fadf58e2c91c527c1cce163e2ea1d7",
+      "da8e8902b08e582927363231c9ccd08b03b86994"
+    ],
+    "relevant_record_ids": [
+      3184,
+      2890,
+      2922,
+      2898,
+      2885
+    ],
+    "irrelevant_record_ids": [
+      4235,
+      3179,
+      2919,
+      2903,
+      2897,
+      2917,
+      2899
+    ]
+  },
+  "m05": {
+    "answer": "Changing EMBEDDING_MODEL requires rebuilding/re-embedding the stored index.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Accept answer-bearing passages; a passage need not supply every sub-detail of the question.",
+    "relevant_groups": [
+      "40888b2d32b29d00b1517d5bd64bf96b8ab7b3fa"
+    ],
+    "irrelevant_groups": [
+      "099dcec0bb173ca885286528d3c3ddb8c449636a",
+      "3556471d0145d82795263497629ac04fe49a6063",
+      "47739377a1a76fafa09308c9fef4db7f3237e338",
+      "48c8a86498dbd98bcb918427f8b712d2d499aba3",
+      "696080749e1b80cb2386cb79ab4ed3ad70edfe1f",
+      "725cf679082ab46bfc1442a7317c412c57a22015",
+      "9b5cfbe50db0489e5306ef0a12d9cafeea1ef0f4",
+      "a13e18b168d748f307e46bd97bb1b7339f7ec55b",
+      "ab0a4d3a7ed8a7efaefe82119a5e0aa2236d4def",
+      "ceef7fd3ea24afa33353bf661ce127c58efb06e4",
+      "f1957238e16c5cff87aa9c4968de993fa6364c5a"
+    ],
+    "relevant_record_ids": [
+      2901
+    ],
+    "irrelevant_record_ids": [
+      2902,
+      2895,
+      2932,
+      3184,
+      2942,
+      2941,
+      2922,
+      2903,
+      2898,
+      2885,
+      2924
+    ]
+  },
+  "m06": {
+    "answer": "A revision check aborts a rebuild if writes occur during staging; pause writers and retry.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Accept answer-bearing passages; a passage need not supply every sub-detail of the question.",
+    "relevant_groups": [
+      "099dcec0bb173ca885286528d3c3ddb8c449636a",
+      "20261011-124909-784e02"
+    ],
+    "irrelevant_groups": [
+      "40888b2d32b29d00b1517d5bd64bf96b8ab7b3fa",
+      "7de0ad174613bb228c992ebee8c2c886f66bd34e",
+      "8a26e15aab7fea9ea38d13f9648fcd93a73cbce2",
+      "8c895748309e648b199d1548f858a5ae9fc147f2",
+      "90602b4ad0fb98698aac04e386efa2c13b8a6280",
+      "9b5cfbe50db0489e5306ef0a12d9cafeea1ef0f4",
+      "a13e18b168d748f307e46bd97bb1b7339f7ec55b",
+      "b0de4633595e3a1b6de4959c88ef2122803f0e2a"
+    ],
+    "relevant_record_ids": [
+      2902,
+      4235
+    ],
+    "irrelevant_record_ids": [
+      2901,
+      2921,
+      3,
+      2923,
+      2890,
+      2922,
+      2903,
+      2
+    ]
+  },
+  "m07": {
+    "answer": "Disable AOF for the initial RDB restore because existing AOF data takes precedence, then re-enable it.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Accept answer-bearing passages; a passage need not supply every sub-detail of the question.",
+    "relevant_groups": [
+      "5387da547032a097fdbad34b9a5ec96a7e6c136a",
+      "ca34f4b41aea226c3b9e0956ffca8e0f44ae58f1",
+      "e82b8aa535d7f8340736bb00ebc394a70e7b66f6"
+    ],
+    "irrelevant_groups": [
+      "246c5324a7b1019e82b2e116859ce66604278c4b",
+      "37525d65a47e7cc592f0b6abf55df1694e8fe71e",
+      "47739377a1a76fafa09308c9fef4db7f3237e338",
+      "8e74f025a1e4d2b0790b24cfe8cf7cfd50ba5545",
+      "a1908e0781f89784ac66bf678f2c58bdebe88403"
+    ],
+    "relevant_record_ids": [
+      3179,
+      2938,
+      2765
+    ],
+    "irrelevant_record_ids": [
+      2937,
+      3174,
+      2932,
+      2158,
+      2936
+    ]
+  },
+  "m08": {
+    "answer": "A pending stdin pipe read blocks scipy/Fortran inspection during model import; use a private transport pipe and PeekNamedPipe, and DEVNULL for subprocesses.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Accept answer-bearing passages; a passage need not supply every sub-detail of the question.",
+    "relevant_groups": [
+      "1555aee94d1c5ad0d049ac47ec07c257cb917c78"
+    ],
+    "irrelevant_groups": [
+      "157f3ee2c57776004b147054f5a151fd6208ca4f",
+      "65972d6c27a63a6030c9189074d5eac5cf3ea1c8",
+      "863b7a7e24ac0f2a3249d7abb9fca9210273ce29",
+      "b10e046d9e7d59b377f4f072dae4b76ff193677f",
+      "b2988110e3a31edd69885c181e92430abd9d59ec",
+      "bf090311724f14951146bb06e33f5d8622e95c73"
+    ],
+    "relevant_record_ids": [
+      2947
+    ],
+    "irrelevant_record_ids": [
+      2946,
+      2884,
+      3189,
+      2873,
+      2864,
+      2883
+    ]
+  },
+  "m09": {
+    "answer": "updated_at is the time content was written to Redis; source_modified_at is the imported file modification time. Rebuilds preserve these.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Accept answer-bearing passages; a passage need not supply every sub-detail of the question.",
+    "relevant_groups": [
+      "da17c80eb8fadf58e2c91c527c1cce163e2ea1d7"
+    ],
+    "irrelevant_groups": [
+      "1b50cb4e2f6680109e1d295166cb35ff62e18735",
+      "20261011-124909-784e02",
+      "40888b2d32b29d00b1517d5bd64bf96b8ab7b3fa",
+      "5387da547032a097fdbad34b9a5ec96a7e6c136a",
+      "8c895748309e648b199d1548f858a5ae9fc147f2",
+      "9b5cfbe50db0489e5306ef0a12d9cafeea1ef0f4",
+      "9ff302f18d615aa70de07d78f2e2e8b700e71d7d"
+    ],
+    "relevant_record_ids": [
+      2917
+    ],
+    "irrelevant_record_ids": [
+      3172,
+      4236,
+      2901,
+      3179,
+      2923,
+      2922,
+      2919
+    ]
+  },
+  "m10": {
+    "answer": "Search starts with thirty candidates, folds identical content and note chunks, and expands until it has three distinct results or exhausts candidates.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Accept answer-bearing passages; a passage need not supply every sub-detail of the question.",
+    "relevant_groups": [
+      "74e35df4892de58fdb078cffeda2ee95b4c41af8",
+      "90602b4ad0fb98698aac04e386efa2c13b8a6280"
+    ],
+    "irrelevant_groups": [
+      "111a8a674e94bca2cc210da75ca3731e8ee5d55e",
+      "157f3ee2c57776004b147054f5a151fd6208ca4f",
+      "2164b1c65b19c95de4309e7476cf02d882873943",
+      "48c8a86498dbd98bcb918427f8b712d2d499aba3",
+      "7de0ad174613bb228c992ebee8c2c886f66bd34e",
+      "8a26e15aab7fea9ea38d13f9648fcd93a73cbce2",
+      "943617165d8fe6a498da8be8debf4f9c8642c27c",
+      "9b5cfbe50db0489e5306ef0a12d9cafeea1ef0f4",
+      "c41ba19554f0be9ee6176a32b4e3bb489b2c03eb",
+      "da8e8902b08e582927363231c9ccd08b03b86994"
+    ],
+    "relevant_record_ids": [
+      2900,
+      2890
+    ],
+    "irrelevant_record_ids": [
+      2856,
+      2946,
+      2920,
+      3184,
+      2921,
+      3,
+      2914,
+      2922,
+      2943,
+      2899
+    ]
+  },
+  "g01": {
+    "answer": "The current ordinary footprint trail has a 24-slot ring, fades over five to six metres of cumulative travel, and stationary prints fade between twelve and twenty action-time seconds.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Accept answer-bearing passages; a passage need not supply every sub-detail of the question.",
+    "relevant_groups": [
+      "2c423bb99f3ed2c47a47d9254c93b8984ebc08ea",
+      "2ef755ea75514a0db7068294bedb5f468721c8fd",
+      "3b67e7b5b32f3dcba51e9f1cced7088c97cf5dcc",
+      "579b2e258f1b690fbb0e3545aa61a53d96e7acba",
+      "5a951a2b8f666fcf79d6979ba5bc264c3fb05296",
+      "6f65abb4fd5e32934bb62e9d068873871193ab8f",
+      "91c996d87746d8f9ae08b2f5d691ef7ed55708e0",
+      "ab93364cb952096d24249bf8223544882198e465"
+    ],
+    "irrelevant_groups": [
+      "2026e1831becbfe37fed80ddb2af8da3ce4243a2",
+      "23cce91744e7cb7be4b85c2658519d580d443af8",
+      "2e12fd7ccbc59c20bee74d75ad1520d783c4e59a",
+      "c982e2b92b9b25a4a04f63b0990e67e3dd6837b7",
+      "da99a010fa8fb2a2d78055d585c2d9f2a727aa47"
+    ],
+    "relevant_record_ids": [
+      9,
+      1513,
+      1959,
+      167,
+      15,
+      2508,
+      1514,
+      599
+    ],
+    "irrelevant_record_ids": [
+      172,
+      389,
+      16,
+      1124,
+      490
+    ]
+  },
+  "g02": {
+    "answer": "Repeated ground fitting of footprints caused a reproducible CPU slowdown; caching prints and terrain sampling fixed that bottleneck, while intermittent GPU stalls remain separate.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Historical footprint-cache fixes answer this historical-cause intent even if later footprint lifetimes changed.",
+    "relevant_groups": [
+      "3acf95cb21a349ebc5ce8cb8efa01a0ca34a4a79",
+      "54ff4dc024684aba2691e953c309ee1ebd4d59e0",
+      "97f038366f19835269daf6ddd7eaeb3ed5b729e2",
+      "9f3f87c5f8314b2d22d0d2b599b4304ab3906940"
+    ],
+    "irrelevant_groups": [
+      "2026e1831becbfe37fed80ddb2af8da3ce4243a2",
+      "3e024de61bf8989c422b4188417d044e84521e6b",
+      "656bca0dab6e5e6762f24b3b0fb66f7d92e6347e",
+      "74db5b05b1ae123b3120d0e799643a2aa89d7687",
+      "7b98c44c06c044e3d8caaace8826aa19bbf106d8",
+      "ad162cffff2a81573b71444076dbeb0091a6aebf",
+      "afe74e09e5ee5dcec581a9c52de2e878e3e3e7a5"
+    ],
+    "relevant_record_ids": [
+      517,
+      106,
+      540,
+      1957
+    ],
+    "irrelevant_record_ids": [
+      172,
+      2523,
+      187,
+      525,
+      3939,
+      1960,
+      3899
+    ]
+  },
+  "g03": {
+    "answer": "Stillness prepares according to Breath and then decelerates smoothly over 0.60 seconds from world scale 1 to 0.05, even at full Breath.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Reject old instantaneous-entry descriptions and preparation-only formulas that omit the common deceleration.",
+    "relevant_groups": [
+      "3e024de61bf8989c422b4188417d044e84521e6b",
+      "4ad3e7f8fd71b63276eabed8909a136f0433583e",
+      "6935a9b8d9ad2e3c91b6f7988c72fe5148550c6f",
+      "9eb173d9a07036acb5ff32f25537048a54696ad8",
+      "ec6a4fdf256bfead7c372eac2d5987fc162f05e3",
+      "fa0d166e0789701d36a2812485278945bb2c0fe3"
+    ],
+    "irrelevant_groups": [
+      "0a34f1e4dfcedbf69fcf52d3635a95b9110ab3b9",
+      "150421737393d6591a43bc6867ac87cf08ae3b07",
+      "20de426ef8b10597a785e4dfc2436d30757bd305",
+      "20f3af2d25287283ec63b630483db7dc7947aa4a",
+      "506a5b1af4904f046c5482c8d4653a3ec82684c1",
+      "c88e0721969c77c5523e53ca3669aaf9ac59633c",
+      "db22e61edd4c8f94803a381da93078d1aee1019b",
+      "ebdf6084ca2066f198d56c07c236d95c1127047c"
+    ],
+    "relevant_record_ids": [
+      2523,
+      1155,
+      93,
+      1154,
+      641,
+      92
+    ],
+    "irrelevant_record_ids": [
+      354,
+      510,
+      1230,
+      52,
+      1224,
+      357,
+      1170,
+      1255
+    ]
+  },
+  "g04": {
+    "answer": "Environmental ambience slows to thirty percent with a hollow stereo return; breath and heartbeat retain natural timing.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Reject superseded natural-pitch ambience and old proposed 0.65-0.8 rates. Correct ambient or body timing supplies useful evidence.",
+    "relevant_groups": [
+      "1744c232c512b1db2f7619c55bebd23654bc398a",
+      "1d0e6c5699b25374d10eb8a599095100b3c6cb92",
+      "2794b25d3fac1f1bd7c91bafa4ef192be55837f1",
+      "3314d2a2eedf894b42159e34b297bef99020f964",
+      "399b50f6d2b0cbd4f3107a5cff05637ad6be77d3",
+      "48fe6fd3ee1354d8b69402a5ba57c6c2e5ad0104",
+      "78cc87012562955906b12f74ce70f42d4096b117"
+    ],
+    "irrelevant_groups": [
+      "01e9a4867431ee9287de6ad30e2d962fbf31e363",
+      "19d60b4c34f0c94e8a2a843c1f7c490029f3d29c",
+      "43fe41688c6fc12b1eb5c7989568afbbfa3614d3",
+      "f221fce6135f88c4ad5171d7804272e97f62d5b1"
+    ],
+    "relevant_record_ids": [
+      180,
+      97,
+      375,
+      1150,
+      62,
+      644,
+      181
+    ],
+    "irrelevant_record_ids": [
+      1160,
+      1152,
+      1242,
+      512
+    ]
+  },
+  "g05": {
+    "answer": "Quality preset changes made with F2 are saved and applied on restart, not live.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Accept answer-bearing passages; a passage need not supply every sub-detail of the question.",
+    "relevant_groups": [
+      "133d432cf0c28feae8ae84c32aaa9a45f1b80399",
+      "791740ac569a5c99a9374a0d458dce242c912e4a",
+      "f06cde0ca468599a268f886090598c95e745730b"
+    ],
+    "irrelevant_groups": [
+      "33d79b8378f8290866a7b0b5f4713b599a33a12d",
+      "38e3edcf0c28a2c2530d80894759513bd10790b7",
+      "53046a1204f23527f3dddcdb11949c05d58b871d",
+      "607e0696a4ec1aa20897ab4dcaa71e46c02f4a4d",
+      "995a4f4f1990e12dccff6d3615b568acd1eaafbd",
+      "a0b7a430e98829f58df29313d77b45911ed9cb42"
+    ],
+    "relevant_record_ids": [
+      558,
+      478,
+      109
+    ],
+    "irrelevant_record_ids": [
+      528,
+      566,
+      556,
+      3981,
+      1974,
+      3943
+    ]
+  },
+  "g06": {
+    "answer": "Grass, foliage, particles and character attachments share a coherent wind field and gust timing, with different response strengths.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Reject the pre-fix descriptions with independent pollen motion or the removed extra weather-flutter term.",
+    "relevant_groups": [
+      "8096aec45ad8972face440968396b8aa6805f232",
+      "8575d14a614dc1a4f4c34edaaa618deb0f2fe658",
+      "9e8c9034bc6044ee194def0748a9ec7b5faf0260",
+      "c4a48fb9b7c853b6b04ba2cff23ca4dac3ec9ff2"
+    ],
+    "irrelevant_groups": [
+      "0928f99f82157dd667a28da28e59d54b4fa084ae",
+      "5283fbdc7f28c49b4c6ecdb7cf398957d666ce2d",
+      "96f1412710df951f2691a2251ead3237feb91d3d",
+      "a701905e9c9cbbf6a35f1a2517cabf3916b71ef1",
+      "b682fec7d77eb0d30018e64109039c31fb9118c7",
+      "c041cf90f0298f09929d0a2cc3641b77f215458e"
+    ],
+    "relevant_record_ids": [
+      101,
+      53,
+      367,
+      1146
+    ],
+    "irrelevant_record_ids": [
+      365,
+      364,
+      1099,
+      51,
+      102,
+      50
+    ]
+  },
+  "g07": {
+    "answer": "Repeated polish_pixal.forearm_twist passes can drift skin weights; make that operation idempotent before repeated hero rebuilds.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Accept answer-bearing passages; a passage need not supply every sub-detail of the question.",
+    "relevant_groups": [
+      "073ae2db53ee687ea7c8c1a209c523e6da52662b",
+      "59d3e27c9a940385a4250a5b12d503b3750c8fab",
+      "b1be36a1681054a50abd138bb6e0f2f1a2f700fc",
+      "be5676737ccbffa0796d01701412412b684ef123",
+      "ea9c8263888e2cfb90ada58e4683ddd5457d1a7b"
+    ],
+    "irrelevant_groups": [
+      "2006403413bff4e2ed51f4e3ffbc8cdeefcf1acf",
+      "9d32701222d085c4b4aa823836ffb3261eb64136",
+      "f97f2ec98c658dd16f480fa67738ba63ac3e794b"
+    ],
+    "relevant_record_ids": [
+      149,
+      317,
+      4114,
+      1929,
+      125
+    ],
+    "irrelevant_record_ids": [
+      1915,
+      1922,
+      87
+    ]
+  },
+  "g08": {
+    "answer": "The default hero is the selected Pixal3D Mountain Pilgrim with dark mane/beard, ochre tunic and clay-red wrap, not the old procedural hooded hero.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Judge the selected hero identity; unrelated historical movement speeds do not negate correct character-selection evidence.",
+    "relevant_groups": [
+      "183a41e793db96a8ad7afe3301951f4d4923e8cb",
+      "1b0297b75a093b0351b5d8bb21ea6e70f3989fe8",
+      "1f0afd98a277ae2a9ba71fe844b6b0c816b73f37",
+      "228f507767708db6cc32a30c6bd85c5e42e114dc",
+      "23cce91744e7cb7be4b85c2658519d580d443af8",
+      "2fa2df4d962527d0cda1c71c072c3607ccc42436",
+      "ae0c48662649e3d50d1939a633f4081b74fd0c4a",
+      "c9ac5fc5d3587b8544fcbf24eef6c0d0bfd0df3b",
+      "cebcc0c93242980407664f48c4a8460392886ee9"
+    ],
+    "irrelevant_groups": [
+      "011f731f5cdefb232d7b033c52bbbe12ce7f0edd",
+      "04ea03f03488f4142683349321334bf2f84228ae",
+      "3d04849cfdaf68eaf28d0f7e394b6dc54c1c1c28",
+      "e77c3838c5a539cf79ee02bc188be177c46c4bfb"
+    ],
+    "relevant_record_ids": [
+      1207,
+      459,
+      2576,
+      76,
+      389,
+      823,
+      80,
+      392,
+      83
+    ],
+    "irrelevant_record_ids": [
+      207,
+      206,
+      203,
+      229
+    ]
+  },
+  "g09": {
+    "answer": "Only authored pine/bypass route clues get the warm Stillness highlight; ordinary player footprints keep natural soil shading.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Reject the superseded plan that gives both ordinary and guiding prints the same saffron treatment.",
+    "relevant_groups": [
+      "2e12fd7ccbc59c20bee74d75ad1520d783c4e59a",
+      "579b2e258f1b690fbb0e3545aa61a53d96e7acba",
+      "91c996d87746d8f9ae08b2f5d691ef7ed55708e0"
+    ],
+    "irrelevant_groups": [
+      "296346d974725be09313e3d0e53a3b8eee35ea5c",
+      "2fdffb3a2a1f5acc83b560eeda19d3eb8a8d400c",
+      "656bca0dab6e5e6762f24b3b0fb66f7d92e6347e",
+      "7340fb6989dd8ca23d06522ec4deb2c7a430a3d0",
+      "7683ae7a0a49d12f3a326a02d97b88827b50c309",
+      "988dcb70c53f19479969a48ede862a7e20745166",
+      "e7b5655b8623c064ce42229ed7284c4402bd26cd"
+    ],
+    "relevant_record_ids": [
+      16,
+      167,
+      1514
+    ],
+    "irrelevant_record_ids": [
+      1237,
+      2312,
+      187,
+      494,
+      96,
+      1238,
+      1219
+    ]
+  },
+  "g10": {
+    "answer": "Pixal3D is preferred for trees, shrubs and the chosen character; TRELLIS.2 is used for architecture and rigid props; small mass-instanced vegetation stays cards or procedural.",
+    "review": "Assistant-reviewed pooled top-three candidates, with model identity and rank hidden. Binary relevance means useful evidence for the central answer; generic topic mentions and contradictory claims do not qualify.",
+    "note": "Generator comparisons and actual shrub-generation provenance supply partial evidence for the requested asset categories.",
+    "relevant_groups": [
+      "4357b6ae6cbbf67d82d233f188cede81fb91180d",
+      "b4ba5dafd5b7abd639e661d43b1155234e9d96da",
+      "c0fd56b6fd02af02eca714396ab479c8fbf83831"
+    ],
+    "irrelevant_groups": [
+      "0431c90027a87926461f9f8a077acad5739ba610",
+      "251e900b6a29a7bb7f1d19844e991b553918aa35",
+      "2db2a7bf1e2cd70c767cc7ea492a5a33248331a7",
+      "3f80940aaa8ea29b4e86c65c87bb4e656c275fcc",
+      "6200dc20fd1aae50aed09d036f0d273e84b5f6c9",
+      "c1ce5da06836c405b090b01b1062e21bb5755b2a",
+      "d5957c4fdf4387a8be81e9f71cc2cd41c08417c0",
+      "f5d5719af057ee5109b6743eff5ece7bda5f2073",
+      "fa498b41afd19f0eddd6ed95642b50cf57e3c9aa"
+    ],
+    "relevant_record_ids": [
+      2074,
+      2005,
+      2003
+    ],
+    "irrelevant_record_ids": [
+      2034,
+      2077,
+      2628,
+      1100,
+      2008,
+      2068,
+      2007,
+      806,
+      2078
+    ]
+  }
+}
