@@ -105,6 +105,20 @@ of the existing container names. The keeper starts those containers and holds WS
 file it keeps its original single-container behavior. Do not enable the broad legacy sync job for
 curated destinations. Review any future personal automation separately.
 
+### Known limitation: context selection depends on directory routing
+
+The MCP tools have no explicit corpus/project selector independent of `workdir`. In a multi-target
+installation, the supplied directory (or the client's resolved MCP root) must match a configured
+route. An unmapped directory returns `No memory route for this directory` before searching Redis,
+even when the question clearly names a known project. This applies equally to Claude and Codex;
+different directories supplied by the clients can make their behavior appear different.
+
+For now, retain this behavior. Search with an existing directory mapped to the intended project,
+or add an explicit route and restart the shared worker. A single fixed-project installation can
+instead use the `default_target` described above. Explicit corpus/project selection from any
+directory is a deferred enhancement; it must preserve separate databases, work read-only access
+and unambiguous selection of a personal project.
+
 ## Export and test a colleague bundle
 
 ```sh

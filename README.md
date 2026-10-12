@@ -560,6 +560,7 @@ and the timestamps below. No agent turn should be interrupted for a memory revie
 | Searches show another project, or miss what you saved | Check the project named in the result header and pass the absolute project directory as `workdir`. Check repository-local `project-memory.id` if folder names collide. `MEMORY_PROJECT` is only supported for per-client stdio/CLI. |
 | Shared HTTP cannot connect | Check `ProjectMemory-MCP`, `/health` and the stderr log in section 3; allow startup warmup time. Restart clients after changing their transport or restarting the server. |
 | Shared HTTP asks for `workdir` | Pass the absolute existing project directory. The shared process cannot use its own directory as the client's project. |
+| `No memory route for this directory` | The resolved directory has no mapping in `MEMORY_ROUTES`; no database was searched. Use a directory mapped to the intended project, or add its route and restart the worker. Claude and Codex follow the same routing rules. The lack of an explicit context selector is [a documented limitation](CONTEXT_CURATION.md#known-limitation-context-selection-depends-on-directory-routing). |
 | Documents are stale | Check `sync_memory.py --status`, the project scope in `sync_projects.json`, and the sync logs. An `error` status preserves the previous success time. |
 
 ## Using it
