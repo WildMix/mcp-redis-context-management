@@ -85,7 +85,9 @@ def prepare(manifest_path: Path, model) -> dict:
             raise ValueError("Unreviewed content change: " + str(relative))
         text = data.decode("utf-8")
         expected = topic_headings(text)
-        source = domain + "/" + relative.as_posix()
+        # The instance/route carries isolation; citations name the portable corpus
+        # document, without leaking a local folder or work/personal classification.
+        source = relative.as_posix()
         raw = chunk_markdown(text)
         fitted = fit_chunks(model, "doc", source, raw)
         if [c.heading for c in fitted] != expected:

@@ -32,7 +32,7 @@ class CuratedCorpusTests(unittest.TestCase):
         self.assertIn("run server", record["content"])
         self.assertIn("test identity", record["content"])
         self.assertEqual(record["topic_id"], "work/example/guide#run-locally")
-        self.assertEqual(record["source"], "work/guide.md")
+        self.assertEqual(record["source"], "guide.md")
         self.assertNotIn(str(self.root), record["embedding_text"])
 
     def test_unselected_owner_document_is_reported_and_not_imported(self):

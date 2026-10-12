@@ -45,6 +45,8 @@ Use the same stable document identity after moving a corpus to another machine:
 one shared scope for interconnected repositories or individual scopes for independent projects.
 Document IDs start with their domain. Files must resolve inside the corpus root. An edited file
 requires review and an updated hash. This is an editorial gate, not automated source-code review.
+Search citations use the file path relative to that corpus root, such as `DUC.md`, without a
+`work/` or `personal/` prefix. Domain metadata remains separate for routing and import safeguards.
 
 ```sh
 python scripts/preview_curated.py manifest.json --output preview.json
@@ -123,3 +125,17 @@ Keep the private corpus, machine routing, audit material and exports out of the 
 The Markdown remains the source of truth; Redis is its searchable publication. Work content changes
 after editorial review of architecture changes. Personal context may evolve more rapidly; adding
 automatic regeneration later requires a separate freshness policy.
+
+### Implementation depth
+
+Durable context includes runtime topology, control and data flow, persistence and
+extension boundaries, failure semantics, and how a published artifact reaches an
+execution. Describe stable mechanisms and contracts rather than copying method
+signatures, line numbers, machine paths or release pins. Keep exact file/revision
+evidence in manifest provenance outside retrieval text. Reconcile conflicting
+older statements and remove retired application topics when a corpus is revised.
+
+Evaluate realistic questions for the required architectural facts, not merely a
+matching document filename. Preserve prior product knowledge and test a sample of
+earlier queries alongside new questions. Report the scope of these checks without
+claiming exhaustive recall or application runtime validation.
