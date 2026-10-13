@@ -14,7 +14,9 @@ import migrate_memory as migrate
 
 class AgentContextTests(unittest.TestCase):
     def setUp(self):
-        self.base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        # macOS exposes its temporary directory through /var -> /private/var.
+        # Production import paths and Git-discovered worktrees are already resolved.
+        self.base = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
         self.root = self.base / "project"
         self.root.mkdir()
         self.claude = self.base / "claude"

@@ -73,6 +73,10 @@ would pin every client to one project; use repository-local `project-memory.id` 
 
 ## 1. Start Redis
 
+For a Mac restoring separate personal and work exports, follow
+[the macOS setup](docs/MACOS_SETUP.md). It runs both Redis instances and one shared MCP/model
+process at sign-in, with project synchronization disabled.
+
 ```sh
 docker compose up -d --wait
 ```

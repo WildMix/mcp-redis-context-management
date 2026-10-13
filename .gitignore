@@ -17,3 +17,8 @@ hook_directories.txt
 /redis-containers.local.json
 /exports/
 /.migration/
+# Exported databases and private source corpora must never be committed.
+/personal-context-*/
+/nova-work-context-*/
+*.rdb
+.DS_Store
