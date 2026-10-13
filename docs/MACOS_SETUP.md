@@ -34,11 +34,12 @@ Do not run the restore on every startup. Do not start either Compose stack over 
 
 Copy `memory_routes.example.json` to `memory_routes.local.json`, then combine both targets and
 set their routes to this Mac's directories. Give the work target its exported shared project ID.
-Personal routes need one explicit project ID per checkout; use each ID from its manifest. Include
-this tool's checkout as a personal route if you want to save notes about its setup. Routes may be
-prepared before a checkout exists, but MCP calls require an existing absolute `workdir`.
-Linked worktrees inherit their main checkout's route. Unmapped directories fail without searching
-another project or database. Restart the MCP agent after editing routes.
+For automatic directory selection, personal routes need one project ID per checkout; use each ID
+from its manifest. Include this tool's checkout as a personal route for automatic setup-note routing. Routes may be
+prepared before a checkout exists. Directory selection requires an existing absolute `workdir`;
+explicit `context`/`project` selection needs no checkout or route.
+Linked worktrees inherit their main checkout's route. Without explicit context selection, unmapped
+directories fail without searching another project or database. Restart the MCP agent after editing routes.
 
 Keep the work target `read_only: true`, as in the exports. Personal targets may use
 `read_only: false` for explicit MCP saves. Work notes remain blocked even if a client tries to save.
@@ -82,9 +83,12 @@ selectively. Restart existing client sessions after registration. These are the 
 [Codex HTTP settings](https://learn.chatgpt.com/docs/extend/mcp) and
 [Claude Code user-scope settings](https://code.claude.com/docs/en/mcp).
 
-Agent instructions should require searching project memory before unfamiliar work and passing the
-current absolute project directory as `workdir`. Record decisions in project documentation and save
-lasting notes explicitly when appropriate.
+Agent instructions should require searching project memory before unfamiliar work. From any directory,
+call `list_memory_contexts()` and pass `context="work"`, or `context="personal"` with the desired
+`project`. No `workdir` is needed. For automatic directory selection, pass the current absolute project
+directory as `workdir`. Record decisions in project documentation and save lasting personal notes
+explicitly when appropriate. Allow `mcp__project-memory__list_memory_contexts` in Claude's permissions
+alongside the search/save tools if those are explicitly allowed.
 
 ## Synchronization is disabled
 
@@ -133,6 +137,6 @@ Redis databases using the repository's snapshot instructions before moving or re
 
 On Apple Silicon with macOS 26.6 and Python 3.14.8, the pinned dependencies installed unchanged.
 The full suite with `MEMORY_RUN_INTEGRATION=1`, `MEMORY_TEST_REAL_MODEL=1` and the cached model ran
-94 tests: 90 passed, with four Windows-only tests skipped. This includes disposable Redis tests,
-real HTTP clients, model reuse and project isolation. Launcher tests cover unavailable Docker,
-container startup failure, unavailable Redis and paths containing spaces.
+101 tests: 97 passed, with four Windows-only tests skipped. This includes disposable Redis tests,
+real HTTP clients, context selection without checkouts, model reuse and project isolation. Launcher
+tests cover unavailable Docker, container startup failure, unavailable Redis and paths containing spaces.

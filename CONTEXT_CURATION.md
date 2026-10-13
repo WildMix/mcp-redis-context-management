@@ -86,8 +86,8 @@ Copy `memory_routes.example.json` to the ignored `memory_routes.local.json`, adj
 directory roots and project names, and start the server with `MEMORY_ROUTES` pointing to that file.
 The Windows MCP sign-in worker reads this local file automatically. Restart the worker after edits.
 
-Routes are explicit directory boundaries. Linked worktrees inherit their main checkout's route.
-Conflicting or unmapped directories fail; the server never falls back to another domain or searches
+Routes provide automatic selection by directory. Linked worktrees inherit their main checkout's route.
+Without explicit context selection, conflicting or unmapped directories fail; the server never falls back to another domain or searches
 both. All targets share one loaded model but use separate Redis connections. A work target requires
 a fixed shared project and `read_only: true`; the work dataset also rejects MCP saves independently
 of the route. Personal projects can allow optional agent notes. Routes do not collect source files.
@@ -105,19 +105,30 @@ of the existing container names. The keeper starts those containers and holds WS
 file it keeps its original single-container behavior. Do not enable the broad legacy sync job for
 curated destinations. Review any future personal automation separately.
 
-### Known limitation: context selection depends on directory routing
+### Select context from any directory
 
-The MCP tools have no explicit corpus/project selector independent of `workdir`. In a multi-target
-installation, the supplied directory (or the client's resolved MCP root) must match a configured
-route. An unmapped directory returns `No memory route for this directory` before searching Redis,
-even when the question clearly names a known project. This applies equally to Claude and Codex;
-different directories supplied by the clients can make their behavior appear different.
+The MCP tools accept optional `context` and `project` arguments. `context` is a target name from
+`MEMORY_ROUTES`. Call `list_memory_contexts()` to discover targets, their read-only status and project
+IDs, including stored projects with no checkout or route. With the example target names:
 
-For now, retain this behavior. Search with an existing directory mapped to the intended project,
-or add an explicit route and restart the shared worker. A single fixed-project installation can
-instead use the `default_target` described above. Explicit corpus/project selection from any
-directory is a deferred enhancement; it must preserve separate databases, work read-only access
-and unambiguous selection of a personal project.
+```text
+search_project_memory(query="How does the platform work?", context="work")
+search_project_memory(query="Why was this design chosen?", context="personal", project="game")
+save_to_project_memory(title="Design decision", content="...", context="personal", project="game")
+```
+
+Explicit selection takes precedence over `workdir` and MCP roots; neither is consulted or required.
+This lets agents retrieve archived or not-yet-cloned projects from anywhere without pretending to
+be in another checkout. Work retains its fixed project and read-only policy. Personal selection
+requires a project ID unless its target has a fixed project. IDs are normalized to lowercase and
+validated; explicit saves can create a new personal project. Those notes omit branch/worktree
+provenance because the current checkout may be unrelated.
+
+Unknown contexts, a project without a context, missing personal project IDs and conflicting fixed
+project IDs fail rather than guessing. Each request selects exactly one database and one project;
+selectors preserve stored-domain/model validation. Directory routing remains the default when
+neither selector is supplied. Restart clients after updating the server to discover the new tool
+and arguments. The single-instance server without `MEMORY_ROUTES` still uses directory selection.
 
 ## Export and test a colleague bundle
 

@@ -70,6 +70,22 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(server, '_shared_http', False):
             self.assertEqual(await server._directory(self.ctx, ''), os.getcwd())
 
+    async def test_explicit_context_does_not_request_client_roots(self):
+        # Even stale or unrelated client directories cannot interfere with explicit selection.
+        self.roots(self.root, self.root / 'missing')
+        with patch.object(server, 'search', return_value='selected') as search:
+            result = await server.search_project_memory('topic', self.ctx, workdir='missing',
+                                                        context='personal', project='game')
+            self.assertEqual(result, 'selected')
+            search.assert_called_once_with('topic', '', 'personal', 'game')
+        self.session.check_client_capability.assert_not_called()
+
+    async def test_partial_selector_does_not_fall_back_to_directory(self):
+        with patch.object(server, '_router', None):
+            with self.assertRaisesRegex(ValueError, 'require MEMORY_ROUTES'):
+                await server.search_project_memory('topic', self.ctx, workdir=str(self.root), project='game')
+        self.session.check_client_capability.assert_not_called()
+
 
 class ModelTests(unittest.TestCase):
     def test_concurrent_clients_load_one_model(self):
@@ -96,6 +112,12 @@ class ModelTests(unittest.TestCase):
 @unittest.skipUnless(os.environ.get('MEMORY_TEST_REAL_MODEL') == '1', 'set MEMORY_TEST_REAL_MODEL=1 for HTTP/model test')
 class HttpIntegrationTests(unittest.TestCase):
     def test_shared_process_multi_client_project_isolation_and_roots(self):
+        self.check_shared_process(explicit=False)
+
+    def test_explicit_context_without_checkouts_or_client_roots(self):
+        self.check_shared_process(explicit=True)
+
+    def check_shared_process(self, *, explicit):
         r = redis.Redis.from_url(store.REDIS_URL, decode_responses=True)
         self.addCleanup(r.close)
         r.ping()
@@ -111,13 +133,21 @@ class HttpIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='memory-http-') as tmp:
             root = Path(tmp).resolve()
             projects = [root / 'alpha', root / 'beta']
-            for project in projects:
-                project.mkdir()
+            if not explicit:
+                for project in projects:
+                    project.mkdir()
             with socket.socket() as sock:
                 sock.bind(('127.0.0.1', 0))
                 port = sock.getsockname()[1]
             base = f'http://127.0.0.1:{port}'
-            environment = dict(os.environ, MEMORY_INDEX=prefix, MEMORY_PROJECT='', HF_HUB_OFFLINE='1')
+            environment = dict(os.environ, MEMORY_INDEX=prefix, MEMORY_PROJECT='', HF_HUB_OFFLINE='1', MEMORY_ROUTES='')
+            if explicit:
+                r.hset(prefix + ':meta', mapping={'corpus_domain': 'personal'})
+                routes = root / 'routes.json'
+                routes.write_text(json.dumps({'schema': 1, 'targets': {
+                    'personal': {'domain': 'personal', 'redis_url': store.REDIS_URL, 'read_only': False}},
+                    'routes': []}))
+                environment['MEMORY_ROUTES'] = str(routes)
             with (root / 'server.log').open('w+', encoding='utf-8') as log:
                 process = subprocess.Popen([sys.executable, '-u', str(Path(server.__file__).resolve()),
                     '--transport', 'streamable-http', '--port', str(port)], env=environment,
@@ -144,14 +174,17 @@ class HttpIntegrationTests(unittest.TestCase):
                         async def client(n):
                             project = projects[n]
                             async def roots(ctx):
+                                self.assertFalse(explicit, 'Explicit selection must not request client roots')
                                 return types.ListRootsResult(roots=[types.Root(uri=project.as_uri())])
                             async with streamable_http_client(base + '/mcp') as (read, write, _):
                                 async with ClientSession(read, write, list_roots_callback=roots) as session:
                                     await session.initialize()
+                                    selection = {'context': 'personal', 'project': project.name} if explicit else {}
                                     saved = await session.call_tool('save_to_project_memory', {
-                                        'title': project.name, 'content': f'Only {project.name} owns this decision.'})
+                                        'title': project.name, 'content': f'Only {project.name} owns this decision.',
+                                        **selection})
                                     self.assertFalse(saved.isError, str(saved))
-                                    found = await session.call_tool('search_project_memory', {'query': 'decision'})
+                                    found = await session.call_tool('search_project_memory', {'query': 'decision', **selection})
                                     self.assertFalse(found.isError, str(found))
                                     text = found.content[0].text
                                     self.assertIn(f'Only {project.name}', text)
@@ -168,9 +201,22 @@ class HttpIntegrationTests(unittest.TestCase):
                                     self.assertIn('Pass workdir', result.content[0].text)
                                 for project in projects:
                                     result = await session.call_tool('search_project_memory', {
-                                        'query': 'decision', 'workdir': str(project)})
+                                        'query': 'decision', 'workdir': str(project),
+                                        **({'context': 'personal', 'project': project.name} if explicit else {})})
                                     self.assertFalse(result.isError)
                                     self.assertIn(f'Only {project.name}', result.content[0].text)
+                                if explicit:
+                                    catalog = await session.call_tool('list_memory_contexts', {})
+                                    self.assertFalse(catalog.isError)
+                                    contexts = json.loads(catalog.content[0].text)['contexts']
+                                    self.assertEqual(contexts, [{'context': 'personal', 'domain': 'personal',
+                                        'read_only': False, 'project_required': True, 'projects': ['alpha', 'beta']}])
+                                    for selection, error in [({'context': 'personal'}, 'requires an explicit project'),
+                                                             ({'context': 'unknown', 'project': 'alpha'}, 'Unknown'),
+                                                             ({'project': 'alpha'}, 'requires context')]:
+                                        result = await session.call_tool('search_project_memory', {'query': 'decision', **selection})
+                                        self.assertTrue(result.isError)
+                                        self.assertIn(error, result.content[0].text)
                         # The SDK's DNS rebinding protection must remain active.
                         async with httpx.AsyncClient() as client:
                             response = await client.post(base + '/mcp', headers={'Host': 'untrusted.example'}, json={})
@@ -187,6 +233,9 @@ class HttpIntegrationTests(unittest.TestCase):
                     log.seek(0)
                     self.assertEqual(log.read().count('Model ready in'), 1)
                     self.assertEqual(len(list(r.scan_iter(match=prefix + ':note:*'))), 2)
+                    if explicit:
+                        for key in r.scan_iter(match=prefix + ':note:*'):
+                            self.assertEqual(r.hmget(key, 'branch', 'worktree'), ['', ''])
                 finally:
                     if sys.platform == 'win32' and process.poll() is None:
                         # Kill the owned launcher tree, including the actual venv interpreter.

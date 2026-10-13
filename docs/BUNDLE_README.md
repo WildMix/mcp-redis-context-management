@@ -26,10 +26,11 @@ Defaults are container `project-memory-work-copy` and Redis port `6380`. Use `--
 --port 6382` for a second installation or an occupied port. Redis is bound to localhost.
 
 The printed routing-file path belongs to this installation. The default work bundle maps all agent
-directories to its one shared project; it contains no personal database. A personal bundle requires
-explicit directory/project routes before serving. Restore personal data with a distinct name and
-port, for example `python restore.py --name project-memory-personal-copy --port 6381`. Then edit
-`project-memory-personal-copy.routes.json` and add one route per project to its `routes` array:
+directories to its one shared project; it contains no personal database. Personal memory can be
+selected explicitly with `context="personal"` and a `project` ID, without any directory routes.
+Restore personal data with a distinct name and port, for example
+`python restore.py --name project-memory-personal-copy --port 6381`. For optional automatic selection
+by directory, add one route per project to `project-memory-personal-copy.routes.json`:
 
 ```json
 {"root": "C:/projects/my-game", "target": "personal", "project": "<project value from manifest.json>"}
@@ -57,8 +58,10 @@ is already occupied.
 
 Register an HTTP MCP server named `project-memory` in your agent, with URL
 `http://127.0.0.1:8765/mcp`. Use the port you selected. No credentials are required for this local
-endpoint. The tools are `search_project_memory` and `save_to_project_memory`; work saves are rejected.
-Tell the agent to pass its existing absolute project directory as `workdir` on every search.
+endpoint. Call `list_memory_contexts` to discover contexts/projects, then `search_project_memory`
+with `context="work"`, or with `context="personal"` and `project="<project ID>"`, from any directory.
+`save_to_project_memory` accepts the same selectors; work saves are rejected. Without selectors,
+pass an existing absolute project directory as `workdir` for automatic routing.
 Work searches cover the entire shared corpus, including relationships between repositories.
 
 To test without an MCP client, in a second PowerShell window with the same environment:

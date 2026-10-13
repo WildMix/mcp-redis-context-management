@@ -51,6 +51,44 @@ class RouterTests(unittest.TestCase):
                 server.save("Title", "Text", str(self.root / "work"), "test")
             connect.assert_not_called()
 
+    def test_explicit_selection_needs_no_directory_and_keeps_fixed_scope(self):
+        router = self.router()
+        with patch("memory_routing.git") as git:
+            self.assertEqual(router.select("work")[1], "platform")
+            self.assertEqual(router.select("personal", "Game")[1], "game")
+            self.assertEqual(router.select("personal", "new-project")[1], "new-project")
+            git.assert_not_called()
+        for context, project, error in (("work", "game", "fixed"), ("unknown", "game", "Unknown"),
+                                         ("personal", "", "requires"), ("", "game", "requires context"),
+                                         ("personal", "*", "1-128")):
+            with self.subTest(context=context, project=project), self.assertRaisesRegex(ValueError, error):
+                router.select(context, project)
+
+    def test_explicit_work_save_rejected_even_from_personal_directory(self):
+        router = self.router()
+        with patch.object(server, "_router", router), patch.object(router, "connect") as connect:
+            with self.assertRaisesRegex(ValueError, "read-only"):
+                server.save("Title", "Text", str(self.root / "game"), "test", context="work")
+            connect.assert_not_called()
+
+    def test_catalog_lists_stored_projects_without_routes(self):
+        router = self.router()
+        with patch.object(router, "connect") as connect, patch("memory_routing.index_exists", return_value=True):
+            connect.return_value.hget.return_value = ""
+            connect.return_value.ft.return_value.tagvals.return_value = ["archived-project", "game"]
+            contexts = {item["context"]: item for item in router.contexts()}
+        self.assertEqual(contexts["work"]["projects"], ["platform"])
+        self.assertTrue(contexts["work"]["read_only"])
+        self.assertFalse(contexts["work"]["project_required"])
+        self.assertEqual(contexts["personal"]["projects"], ["archived-project", "game"])
+        self.assertTrue(contexts["personal"]["project_required"])
+
+    def test_explicit_selection_requires_routing_configuration(self):
+        with patch.object(server, "_router", None), patch.object(server, "connect") as connect:
+            with self.assertRaisesRegex(ValueError, "require MEMORY_ROUTES"):
+                server.destination(str(self.root), context="personal", project="game")
+            connect.assert_not_called()
+
     def test_default_only_for_single_fixed_scope(self):
         self.data["default_target"] = "work"
         with self.assertRaisesRegex(ValueError, "only for one"):

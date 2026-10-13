@@ -2,6 +2,8 @@
 
 Use the shared `project-memory` MCP server:
 
+- From any directory, call `list_memory_contexts` and select `context` plus `project` where required.
+  Explicit selection needs no checkout; `workdir` remains available for automatic directory routing.
 - Call `search_project_memory` before answering, planning or editing in an unfamiliar project area.
   Rephrase missed searches, read cited docs, and check historical notes against current code.
 - Record lasting project decisions and their reasons in project documentation. When enabled, the

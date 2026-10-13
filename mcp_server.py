@@ -2,12 +2,13 @@
 agent (Claude Code, Codex, ...) and every worktree of a project, in a Redis Stack vector index.
 
 Tools:
+- list_memory_contexts(): discover configured contexts and their project IDs from anywhere.
 - search_project_memory(query): the 3 entries of this project most similar to the query (KNN over
   local sentence-transformers embeddings): notes saved by agents and imported docs.
 - save_to_project_memory(title, content): optionally stores a note, embedded with the same model.
 
-A call is about the project of the directory the agent works in (see memory_store.project_of): the
-workdir argument if given, else the client's MCP roots. Only stdio falls back to the server's cwd.
+A call can explicitly select context/project, independently of the filesystem. Otherwise it uses
+workdir or the client's MCP roots. Only stdio falls back to the server's cwd.
 
     python mcp_server.py                  # serve MCP over stdin/stdout (what Claude Code and Codex launch)
     python mcp_server.py --transport streamable-http  # one warm server on 127.0.0.1:8765/mcp
@@ -16,6 +17,7 @@ workdir argument if given, else the client's MCP roots. Only stdio falls back to
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import secrets
 import sys
@@ -53,11 +55,13 @@ _shared_http = False
 _router = None
 
 
-def destination(directory: str, *, writing: bool = False):
+def destination(directory: str, *, writing: bool = False, context: str = "", project: str = ""):
     if _router is None:
+        if context or project:
+            raise ValueError("Explicit contexts require MEMORY_ROUTES. Use workdir with this unrouted server.")
         project, client = project_of(directory), connect()
     else:
-        target, project = _router.resolve(directory)
+        target, project = _router.select(context, project) if context or project else _router.resolve(directory)
         if writing and target.read_only:
             raise ValueError("This corpus is read-only through MCP. Edit and publish its curated Markdown instead.")
         client = _router.connect(target)
@@ -143,7 +147,11 @@ mcp = FastMCP(
     "project-memory",
     log_level="WARNING",  # the root logger, to stderr: keeps per-request and model-loading INFO lines out
     # Clients show these instructions even when they defer the tools, so they carry the rule on their own.
-    instructions="Pass your absolute current project directory as workdir on every tool call. "
+    instructions="Use list_memory_contexts to discover available memory. To access it from any directory, "
+                 "pass context (for example work or personal) and, for personal memory, project. "
+                 "Explicit selection takes precedence over workdir and client roots; no checkout is required. "
+                 "Otherwise pass your absolute current project directory as workdir. Never guess an ambiguous "
+                 "context or personal project. Work memory is read-only. "
                  "CRITICAL: this server is the long-term memory of the project you are working in, shared by every "
                  "agent and worktree: notes earlier sessions saved about what they changed and decided, plus the "
                  "project's docs and handoffs. Call search_project_memory WHENEVER the user asks about the "
@@ -169,11 +177,11 @@ def _field(doc, name: str) -> str:
     return getattr(doc, name, "") or ""
 
 
-def search(query: str, directory: str) -> str:
+def search(query: str, directory: str, context: str = "", project: str = "") -> str:
     query = query.strip()
     if not query:
         return "Empty query: ask a question or name a topic."
-    project, r = destination(directory)
+    project, r = destination(directory, context=context, project=project)
     for _ in range(3):
         namespace = namespace_of(r)
         try:
@@ -264,14 +272,17 @@ def note_chunks(content: str, model, title: str) -> list[str]:
     return [chunk.text for chunk in fit_chunks(model, "note", "", [Chunk(title, content, 1, 1)])]
 
 
-def save(title: str, content: str, directory: str, agent: str) -> str:
+def save(title: str, content: str, directory: str, agent: str, context: str = "", project: str = "") -> str:
     title, content = " ".join(title.split()), content.strip()
     if not title or not content:
         raise ValueError("A note needs both a title and content.")
     if len(content) > MAX_NOTE_CHARS:
         raise ValueError(f"The note has {len(content)} characters; condense it to what another agent needs "
                          f"to know, under {MAX_NOTE_CHARS}.")
-    project, r = destination(directory, writing=True)
+    project, r = destination(directory, writing=True, context=context, project=project)
+    if context:
+        # The caller may be in an unrelated repo; do not attach its branch or the server's cwd.
+        directory = ""
     model = embedding_model()
     namespace = ensure_index(r, model_dimension(model))
 
@@ -280,8 +291,8 @@ def save(title: str, content: str, directory: str, agent: str) -> str:
         vectors = encode(model, [embedding_text("note", "", title, piece) for piece in pieces])
     now = time.time()
     note_id = time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + "-" + secrets.token_hex(8)
-    worktree = git(directory, "rev-parse", "--show-toplevel")
-    branch = git(directory, "branch", "--show-current")
+    worktree = git(directory, "rev-parse", "--show-toplevel") if directory else ""
+    branch = git(directory, "branch", "--show-current") if directory else ""
     records = []
     for n, (piece, vector) in enumerate(zip(pieces, vectors)):
         records.append((f"{namespace.notes}{note_id}:{n}", {
@@ -333,13 +344,30 @@ async def _directory(ctx: Context, workdir: str) -> str:
     if _shared_http:
         if len(set(directories)) == 1:
             return directories[0]
-        raise ValueError("Pass workdir with your absolute current project directory. The shared HTTP "
-                         "server needs an explicit workdir or exactly one valid local MCP root.")
+        raise ValueError("Pass workdir with your absolute current project directory, or select context "
+                         "and project using list_memory_contexts. Without explicit selection, shared HTTP "
+                         "needs workdir or exactly one valid local MCP root.")
     return os.getcwd()
 
 
 @mcp.tool()
-async def search_project_memory(query: str, ctx: Context, workdir: str = "") -> str:
+async def list_memory_contexts() -> str:
+    """List available memory contexts, project IDs and read-only status from any directory.
+
+    No workdir or local checkout is needed. Use the returned context and project IDs with
+    search_project_memory or save_to_project_memory. A fixed-project context needs only context;
+    other contexts require an explicit project. Choose the intended context, never search both
+    work and personal by default. Personal saves can create a new project using a valid project ID.
+    """
+    if _router is None:
+        return json.dumps({"contexts": [], "message": "This server uses directory selection. "
+                           "Configure MEMORY_ROUTES to enable explicit contexts, or pass workdir."})
+    return json.dumps({"contexts": await anyio.to_thread.run_sync(_router.contexts)})
+
+
+@mcp.tool()
+async def search_project_memory(query: str, ctx: Context, workdir: str = "",
+                                context: str = "", project: str = "") -> str:
     """CRITICAL: Use this tool WHENEVER the user asks about the project's architecture, design, past
     sessions, decisions or specific implementations that are not immediately visible in your current file
     context. DO NOT guess or apologize for lacking context: you MUST call this tool first to retrieve the
@@ -348,7 +376,8 @@ async def search_project_memory(query: str, ctx: Context, workdir: str = "") -> 
     It searches the long-term memory of the project you are working in: notes other agents saved about
     what they changed and decided, and the project's docs (design notes, handoffs, earlier memory files).
     Worktree routes share a memory. A configured shared corpus can include related repositories;
-    work and personal domains are isolated. Unmapped directories are rejected in routed mode.
+    work and personal domains are isolated. Select context/project to search from anywhere without
+    a local checkout. Otherwise unmapped directories are rejected in routed mode.
 
     Ask in natural language ("how is authentication wired?", "why did the build move to clang?"). If a
     search misses, rephrase it (other words, the feature's or file's name) before concluding that nothing
@@ -358,14 +387,17 @@ async def search_project_memory(query: str, ctx: Context, workdir: str = "") -> 
 
     Args:
         query: the question or topic to look up
-        workdir: your absolute current project directory; always pass this with the shared HTTP server
+        workdir: absolute project directory for automatic routing; ignored when context/project is supplied
+        context: context name from list_memory_contexts (e.g. work or personal); overrides directory routing
+        project: project ID in that context; required for personal memory (e.g. bodhidharma)
     """
-    directory = await _directory(ctx, workdir)
-    return await anyio.to_thread.run_sync(search, query, directory)
+    directory = "" if context or project else await _directory(ctx, workdir)
+    return await anyio.to_thread.run_sync(search, query, directory, context, project)
 
 
 @mcp.tool()
-async def save_to_project_memory(title: str, content: str, ctx: Context, workdir: str = "") -> str:
+async def save_to_project_memory(title: str, content: str, ctx: Context, workdir: str = "",
+                                 context: str = "", project: str = "") -> str:
     """Save a note to the long-term memory of the project you are working in, where every other agent and
     worktree on the project finds it with search_project_memory.
 
@@ -382,11 +414,13 @@ async def save_to_project_memory(title: str, content: str, ctx: Context, workdir
     Args:
         title: one line naming what the note is about
         content: the note, in plain text or Markdown (at most 6000 characters)
-        workdir: your absolute current project directory; always pass this with the shared HTTP server
+        workdir: absolute project directory for automatic routing; ignored when context/project is supplied
+        context: context name from list_memory_contexts; work is read-only; personal allows saves
+        project: explicit project ID in the selected context; personal saves can create a new project
     """
-    directory = await _directory(ctx, workdir)
+    directory = "" if context or project else await _directory(ctx, workdir)
     client = ctx.session.client_params.clientInfo if ctx.session.client_params else None
-    return await anyio.to_thread.run_sync(save, title, content, directory, client.name if client else "")
+    return await anyio.to_thread.run_sync(save, title, content, directory, client.name if client else "", context, project)
 
 
 def main() -> None:

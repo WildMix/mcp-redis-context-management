@@ -1,4 +1,4 @@
-"""Explicit local directory-to-instance routing; no fallback across domains."""
+"""Explicit context or local directory selection; no fallback across domains."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 import redis
 
-from memory_store import META_KEY, check_model, git, hold_wsl_open
+from memory_store import META_KEY, check_model, git, hold_wsl_open, index_exists, namespace_of
 
 
 @dataclass(frozen=True)
@@ -91,7 +91,43 @@ class Router:
         if self.default:
             target = self.targets[self.default]
             return target, target.project
-        raise ValueError("No memory route for this directory. Add its explicit project mapping to MEMORY_ROUTES; no database was searched.")
+        raise ValueError("No memory route for this directory. Use list_memory_contexts and pass context "
+                         "(plus project for personal memory), or add a mapping to MEMORY_ROUTES; no database was searched.")
+
+    def select(self, context: str, project: str = "") -> tuple[Target, str]:
+        """Select one configured database without consulting the filesystem or client roots."""
+        context, project = context.strip(), project.strip().lower()
+        if not context:
+            raise ValueError("An explicit project requires context; use list_memory_contexts to choose one.")
+        if context not in self.targets:
+            raise ValueError("Unknown memory context. Available contexts: " + ", ".join(sorted(self.targets)))
+        target = self.targets[context]
+        if project and not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,127}", project):
+            raise ValueError("project must be 1-128 letters, digits, dots, underscores or hyphens.")
+        if target.project:
+            if project and project != target.project:
+                raise ValueError(f'Context "{context}" is fixed to project "{target.project}".')
+            return target, target.project
+        if not project:
+            raise ValueError(f'Context "{context}" requires an explicit project; use list_memory_contexts.')
+        return target, project
+
+    def contexts(self) -> list[dict]:
+        """List project IDs, including stored projects without a local checkout or route."""
+        result = []
+        for target in self.targets.values():
+            client = self.connect(target)
+            projects = {project for _, routed, project in self.routes if routed == target}
+            if target.project:
+                projects = {target.project}
+            else:
+                namespace = namespace_of(client)
+                if index_exists(client, namespace.index):
+                    projects.update(client.ft(namespace.index).tagvals("project"))
+            result.append({"context": target.name, "domain": target.domain,
+                           "read_only": target.read_only, "project_required": not bool(target.project),
+                           "projects": sorted(projects)})
+        return result
 
     def connect(self, target: Target):
         hold_wsl_open()

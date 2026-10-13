@@ -5,7 +5,8 @@ and every git worktree all read and write the same memory. A background synchron
 documentation and saved agent context while Claude or Codex is open. Agents search that knowledge
 before starting work and can still save notes explicitly.
 
-- **`mcp_server.py`** serves MCP over stdio or a shared local HTTP connection, with two tools:
+- **`mcp_server.py`** serves MCP over stdio or a shared local HTTP connection, with three tools:
+  - `list_memory_contexts()` lists configured contexts, their projects and read-only status.
   - `search_project_memory(query)` returns the 3 entries of the current project most similar to the
     query.
   - `save_to_project_memory(title, content)` stores a note.
@@ -18,6 +19,24 @@ Entries live in a Redis Stack vector index (RediSearch, HNSW, cosine). They are 
 `sentence-transformers/all-MiniLM-L6-v2` (384 dimensions), so nothing leaves the machine.
 
 ## How projects are told apart
+
+With `MEMORY_ROUTES` configured, select memory from **any directory**, without a local checkout.
+Call `list_memory_contexts()` to discover context and project names, then:
+
+```text
+search_project_memory(query="How are builds executed?", context="work")
+search_project_memory(query="How does stillness work?", context="personal", project="bodhidharma")
+save_to_project_memory(title="A decision", content="...", context="personal", project="bodhidharma")
+```
+
+`context` names a configured target. Work uses its fixed shared project and remains read-only.
+Personal contexts without a fixed project require `project`; a valid new project ID can receive
+notes without a directory route. Explicit selection overrides `workdir` and client roots and never
+searches another database on a miss. Unknown contexts, missing personal project IDs and conflicting
+fixed project IDs fail. These saves omit branch/worktree provenance because the caller may be in an
+unrelated checkout. Discovery lists both stored and routed project IDs.
+
+Without explicit selectors, the existing directory-based behavior below applies.
 
 Each entry carries a project name: the folder name of the repository's main checkout. All worktrees
 of a repository therefore share one memory (`~/game`, `~/game-claude` and `~/game-codex` are all
@@ -42,7 +61,7 @@ The server works out the directory each call is about from:
 3. in **stdio mode only**, else its own working directory. Claude Code and Codex both start stdio servers in the session's
    directory, so one global registration serves every project.
 
-For shared HTTP, always pass the absolute current project directory as `workdir`. Without it, the
+For shared HTTP without explicit context selection, pass the absolute project directory as `workdir`. Without it, the
 server accepts exactly one existing local MCP root; missing or ambiguous roots produce an error.
 Relative and nonexistent directories are rejected. Each request is resolved independently, so
 concurrent sessions can work in different projects. Shared HTTP rejects `MEMORY_PROJECT`, since it
@@ -257,6 +276,7 @@ To let agents use both tools without a permission prompt each time, add these to
 
 ```json
 "mcp__project-memory__search_project_memory",
+"mcp__project-memory__list_memory_contexts",
 "mcp__project-memory__save_to_project_memory"
 ```
 
@@ -528,7 +548,7 @@ claude mcp get project-memory
 
 Expected: `Status: ✔ Connected`, with the command, arguments and environment you configured
 (`claude mcp list` shows the same status for every server). In a session, `/mcp` lists the server
-with its two tools.
+with its three tools.
 
 **4. Codex connects.** `codex mcp list` only shows the configuration (`enabled`). To check the
 connection itself, make one headless call from `<project>`:
@@ -563,8 +583,8 @@ and the timestamps below. No agent turn should be interrupted for a memory revie
 | A tool answers `was built with ..., not ...` | The index was built with another embedding model. Set `EMBEDDING_MODEL` back, or run `migrate_memory.py --rebuild`. |
 | Searches show another project, or miss what you saved | Check the project named in the result header and pass the absolute project directory as `workdir`. Check repository-local `project-memory.id` if folder names collide. `MEMORY_PROJECT` is only supported for per-client stdio/CLI. |
 | Shared HTTP cannot connect | Check `ProjectMemory-MCP`, `/health` and the stderr log in section 3; allow startup warmup time. Restart clients after changing their transport or restarting the server. |
-| Shared HTTP asks for `workdir` | Pass the absolute existing project directory. The shared process cannot use its own directory as the client's project. |
-| `No memory route for this directory` | The resolved directory has no mapping in `MEMORY_ROUTES`; no database was searched. Use a directory mapped to the intended project, or add its route and restart the worker. Claude and Codex follow the same routing rules. The lack of an explicit context selector is [a documented limitation](CONTEXT_CURATION.md#known-limitation-context-selection-depends-on-directory-routing). |
+| Shared HTTP asks for `workdir` | Select `context` and `project`, or pass an existing absolute project directory. The shared process cannot use its own directory as the client's project. |
+| `No memory route for this directory` | Call `list_memory_contexts`, then select `context` (and `project` for personal memory) to use memory from anywhere. Directory routes remain an optional convenience; see [context selection](CONTEXT_CURATION.md#select-context-from-any-directory). |
 | Documents are stale | Check `sync_memory.py --status`, the project scope in `sync_projects.json`, and the sync logs. An `error` status preserves the previous success time. |
 
 ## Using it
