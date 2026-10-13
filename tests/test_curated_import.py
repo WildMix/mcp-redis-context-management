@@ -3,8 +3,9 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import redis
 import import_curated
@@ -76,12 +77,37 @@ class RouterTests(unittest.TestCase):
         with patch.object(router, "connect") as connect, patch("memory_routing.index_exists", return_value=True):
             connect.return_value.hget.return_value = ""
             connect.return_value.ft.return_value.tagvals.return_value = ["archived-project", "game"]
+            connect.return_value.ft.return_value.search.return_value = SimpleNamespace(docs=[], total=0)
             contexts = {item["context"]: item for item in router.contexts()}
         self.assertEqual(contexts["work"]["projects"], ["platform"])
         self.assertTrue(contexts["work"]["read_only"])
         self.assertFalse(contexts["work"]["project_required"])
         self.assertEqual(contexts["personal"]["projects"], ["archived-project", "game"])
         self.assertTrue(contexts["personal"]["project_required"])
+
+    def test_catalog_maps_resources_to_projects_and_deduplicates_paged_chunks(self):
+        router = self.router()
+        work, personal = MagicMock(), MagicMock()
+        for client in (work, personal):
+            client.hget.return_value = ""
+        work.ft.return_value.search.side_effect = [
+            SimpleNamespace(total=3, docs=[SimpleNamespace(project="platform", source="COMPONENT-A.md")]*2),
+            SimpleNamespace(total=3, docs=[SimpleNamespace(project="platform", source="COMPONENT-B.md")])]
+        personal.ft.return_value.tagvals.return_value = ["game", "archived"]
+        personal.ft.return_value.search.return_value = SimpleNamespace(total=2, docs=[
+            SimpleNamespace(project="game", source="gameplay.md"),
+            SimpleNamespace(project="archived", source="design.md")])
+        with patch.object(router, "connect", side_effect=[work, personal]), \
+                patch("memory_routing.index_exists", return_value=True):
+            contexts = {item["context"]: item for item in router.contexts()}
+        self.assertEqual(contexts["work"]["resources"], {"platform": ["COMPONENT-A.md", "COMPONENT-B.md"]})
+        self.assertEqual(contexts["personal"]["resources"], {"archived": ["design.md"], "game": ["gameplay.md"]})
+        self.assertEqual(work.ft.return_value.search.call_count, 2)
+        for call in work.ft.return_value.search.call_args_list:
+            args = call.args[0].get_args()
+            self.assertEqual(args[0], "@kind:{doc} @project:{platform}")
+            fields = args.index("RETURN")
+            self.assertEqual(args[fields+1:fields+4], [2, "project", "source"])
 
     def test_explicit_selection_requires_routing_configuration(self):
         with patch.object(server, "_router", None), patch.object(server, "connect") as connect:

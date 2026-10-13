@@ -206,11 +206,16 @@ class HttpIntegrationTests(unittest.TestCase):
                                     self.assertFalse(result.isError)
                                     self.assertIn(f'Only {project.name}', result.content[0].text)
                                 if explicit:
+                                    # Resource discovery reads metadata even for a document without
+                                    # an embedding; no content or vector needs to enter the catalog.
+                                    r.hset(prefix + ':doc:catalog', mapping={
+                                        'kind': 'doc', 'project': 'alpha', 'source': 'gameplay.md'})
                                     catalog = await session.call_tool('list_memory_contexts', {})
                                     self.assertFalse(catalog.isError)
                                     contexts = json.loads(catalog.content[0].text)['contexts']
                                     self.assertEqual(contexts, [{'context': 'personal', 'domain': 'personal',
-                                        'read_only': False, 'project_required': True, 'projects': ['alpha', 'beta']}])
+                                        'read_only': False, 'project_required': True, 'projects': ['alpha', 'beta'],
+                                        'resources': {'alpha': ['gameplay.md'], 'beta': []}}])
                                     for selection, error in [({'context': 'personal'}, 'requires an explicit project'),
                                                              ({'context': 'unknown', 'project': 'alpha'}, 'Unknown'),
                                                              ({'project': 'alpha'}, 'requires context')]:

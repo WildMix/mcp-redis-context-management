@@ -45,6 +45,18 @@ TOP_K = 3
 CANDIDATES = 30
 MAX_NOTE_CHARS = 6000
 
+SEARCH_GUIDANCE = (
+    "For questions spanning multiple topics or projects, first use list_memory_contexts and its "
+    "resources to map each topic to the relevant context/project. A mixed work-and-personal question "
+    "requires separate search_project_memory calls with focused subqueries in BOTH contexts; "
+    "do not send the whole mixed question to just one project or repeat it unchanged in every scope. "
+    "Comparisons need evidence for each side, with additional focused searches if the top three "
+    "results omit a part. Combine the findings, identifying each context/project and its sources. "
+    "A miss in one scope says nothing about another. Multiple clearly requested scopes are not "
+    "ambiguous intent: search each relevant scope without asking the user to choose only one. "
+    "Do not search unrelated scopes for a single-topic question."
+)
+
 
 _model = None
 _model_lock = threading.Lock()
@@ -151,7 +163,7 @@ mcp = FastMCP(
                  "pass context (for example work or personal) and, for personal memory, project. "
                  "Explicit selection takes precedence over workdir and client roots; no checkout is required. "
                  "Otherwise pass your absolute current project directory as workdir. Never guess an ambiguous "
-                 "context or personal project. Work memory is read-only. "
+                 "context or personal project. " + SEARCH_GUIDANCE + " Work memory is read-only. "
                  "CRITICAL: this server is the long-term memory of the project you are working in, shared by every "
                  "agent and worktree: notes earlier sessions saved about what they changed and decided, plus the "
                  "project's docs and handoffs. Call search_project_memory WHENEVER the user asks about the "
@@ -352,17 +364,22 @@ async def _directory(ctx: Context, workdir: str) -> str:
 
 @mcp.tool()
 async def list_memory_contexts() -> str:
-    """List available memory contexts, project IDs and read-only status from any directory.
+    """Discover contexts, project IDs, source document names and read-only status from any directory.
 
     No workdir or local checkout is needed. Use the returned context and project IDs with
     search_project_memory or save_to_project_memory. A fixed-project context needs only context;
-    other contexts require an explicit project. Choose the intended context, never search both
-    work and personal by default. Personal saves can create a new project using a valid project ID.
+    other contexts require an explicit project. The resources map shows which documents belong to
+    each project, including components grouped under one shared work project. Match the question's
+    topics to those resources, allowing common acronym/spelling variants. For mixed work/personal
+    questions, make separate focused search_project_memory calls in each relevant context/project
+    and combine the evidence. Do not choose only one scope for a clearly mixed question.
+    Personal saves can create a new project using a valid project ID.
     """
     if _router is None:
         return json.dumps({"contexts": [], "message": "This server uses directory selection. "
                            "Configure MEMORY_ROUTES to enable explicit contexts, or pass workdir."})
-    return json.dumps({"contexts": await anyio.to_thread.run_sync(_router.contexts)})
+    return json.dumps({"search_guidance": SEARCH_GUIDANCE,
+                       "contexts": await anyio.to_thread.run_sync(_router.contexts)})
 
 
 @mcp.tool()
@@ -379,6 +396,12 @@ async def search_project_memory(query: str, ctx: Context, workdir: str = "",
     work and personal domains are isolated. Select context/project to search from anywhere without
     a local checkout. Otherwise unmapped directories are rejected in routed mode.
 
+    Each call searches ONLY ONE context/project. For a mixed work/personal question, first call
+    list_memory_contexts to map topics using its resources, then split the question and search each
+    relevant context/project separately with a focused subquery. For comparisons, retrieve evidence
+    for each side. Do not send the full mixed question to just one project or treat its results as
+    covering other scopes. Combine the findings with their context/project and source attribution.
+
     Ask in natural language ("how is authentication wired?", "why did the build move to clang?"). If a
     search misses, rephrase it (other words, the feature's or file's name) before concluding that nothing
     is recorded. Returns the 3 most similar entries and where each comes from: for a doc, open the file at
@@ -386,7 +409,7 @@ async def search_project_memory(query: str, ctx: Context, workdir: str = "",
     the corpus bundle. A note is history, so check it against the current code.
 
     Args:
-        query: the question or topic to look up
+        query: a focused question about this context/project; split mixed-topic requests into separate calls
         workdir: absolute project directory for automatic routing; ignored when context/project is supplied
         context: context name from list_memory_contexts (e.g. work or personal); overrides directory routing
         project: project ID in that context; required for personal memory (e.g. bodhidharma)

@@ -6,7 +6,7 @@ documentation and saved agent context while Claude or Codex is open. Agents sear
 before starting work and can still save notes explicitly.
 
 - **`mcp_server.py`** serves MCP over stdio or a shared local HTTP connection, with three tools:
-  - `list_memory_contexts()` lists configured contexts, their projects and read-only status.
+  - `list_memory_contexts()` lists configured contexts, their projects, document names and read-only status.
   - `search_project_memory(query)` returns the 3 entries of the current project most similar to the
     query.
   - `save_to_project_memory(title, content)` stores a note.
@@ -34,7 +34,17 @@ Personal contexts without a fixed project require `project`; a valid new project
 notes without a directory route. Explicit selection overrides `workdir` and client roots and never
 searches another database on a miss. Unknown contexts, missing personal project IDs and conflicting
 fixed project IDs fail. These saves omit branch/worktree provenance because the caller may be in an
-unrelated checkout. Discovery lists both stored and routed project IDs.
+unrelated checkout. Discovery lists both stored and routed project IDs, with a `resources` map
+from each project to its source documents. This exposes components grouped under a shared corpus
+instead of requiring agents to recognize only its umbrella project name.
+
+For a question mixing work and personal topics, use that catalog to split it into focused searches
+in each relevant context/project, then combine the cited findings. For example, search the personal
+game's gameplay in its project and the work platform's deployment in the work context. Comparisons
+need evidence for each side, with additional searches when three results do not cover every part.
+Do not send the entire mixed question to one project, infer that a miss applies to other contexts,
+or ask the user to choose one scope when the question clearly requests several. Single-topic
+questions still use just the relevant scope; no database fallback or automatic fan-out occurs.
 
 Without explicit selectors, the existing directory-based behavior below applies.
 

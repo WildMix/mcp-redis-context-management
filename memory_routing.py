@@ -10,8 +10,9 @@ import threading
 from urllib.parse import urlparse
 
 import redis
+from redis.commands.search.query import Query
 
-from memory_store import META_KEY, check_model, git, hold_wsl_open, index_exists, namespace_of
+from memory_store import META_KEY, check_model, git, hold_wsl_open, index_exists, namespace_of, tag
 
 
 @dataclass(frozen=True)
@@ -113,20 +114,39 @@ class Router:
         return target, project
 
     def contexts(self) -> list[dict]:
-        """List project IDs, including stored projects without a local checkout or route."""
+        """List project IDs and source names so clients can map topics to the right scope."""
         result = []
         for target in self.targets.values():
             client = self.connect(target)
             projects = {project for _, routed, project in self.routes if routed == target}
+            namespace = namespace_of(client)
+            has_index = index_exists(client, namespace.index)
             if target.project:
                 projects = {target.project}
-            else:
-                namespace = namespace_of(client)
-                if index_exists(client, namespace.index):
-                    projects.update(client.ft(namespace.index).tagvals("project"))
+            elif has_index:
+                projects.update(client.ft(namespace.index).tagvals("project"))
+            sources = {}
+            if has_index:
+                # Fetch only routing metadata, never document bodies or embeddings. Multiple chunks
+                # of one document collapse to one source; fixed targets reveal only their project.
+                query = "@kind:{doc}"
+                if target.project:
+                    query += f" @project:{{{tag(target.project)}}}"
+                offset = 0
+                while True:
+                    page = client.ft(namespace.index).search(
+                        Query(query).return_fields("project", "source").paging(offset, 250))
+                    for doc in page.docs:
+                        if doc.project and doc.source:
+                            projects.add(doc.project)
+                            sources.setdefault(doc.project, set()).add(doc.source)
+                    offset += len(page.docs)
+                    if not page.docs or offset >= page.total:
+                        break
             result.append({"context": target.name, "domain": target.domain,
                            "read_only": target.read_only, "project_required": not bool(target.project),
-                           "projects": sorted(projects)})
+                           "projects": sorted(projects),
+                           "resources": {project: sorted(sources.get(project, ())) for project in sorted(projects)}})
         return result
 
     def connect(self, target: Target):

@@ -117,6 +117,19 @@ search_project_memory(query="Why was this design chosen?", context="personal", p
 save_to_project_memory(title="Design decision", content="...", context="personal", project="game")
 ```
 
+Discovery also returns a `resources` map of project IDs to document source names, plus search guidance.
+Source names are grouped and deduplicated from indexed document metadata, without retrieving text or
+vectors; notes-only projects have an empty source list. Fixed targets expose only their fixed project's
+sources. No extra index, corpus publication or filesystem scan is needed.
+
+For a question with work and personal topics, the agent maps each topic to these resources, issues
+separate focused queries in every relevant context/project, then combines the findings with their
+scope and source citations. Recognize common spelling/acronym variants of resource names. Comparisons
+need evidence for each side and may need further queries within the same shared project. A miss in
+one scope does not imply that other scopes lack the information. This guidance appears in the MCP
+handshake, tool descriptions and discovery response so both Claude and Codex can follow it. It guides
+agent query planning; the server does not classify natural language or silently search other scopes.
+
 Explicit selection takes precedence over `workdir` and MCP roots; neither is consulted or required.
 This lets agents retrieve archived or not-yet-cloned projects from anywhere without pretending to
 be in another checkout. Work retains its fixed project and read-only policy. Personal selection
