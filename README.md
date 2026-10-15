@@ -84,6 +84,7 @@ would pin every client to one project; use repository-local `project-memory.id` 
 | `docker-compose.yml` | Redis Stack on `127.0.0.1:6379` (RedisInsight on `:8001`), data in a volume |
 | `requirements.txt` | `mcp`, `redis`, `sentence-transformers` (+ torch), `numpy` |
 | `mcp_server.py` | The MCP server; `--query "..."` runs one search in the terminal |
+| `memory_cli.py`, `bin/memory` | Shell client of the shared HTTP server, for agents without MCP support |
 | `memory_store.py` | Shared by both scripts: settings, Redis connection, index schema, project names, chunking |
 | `migrate_memory.py` | One-off import of existing Markdown; `--rebuild` re-embeds everything |
 | `agent_context.py` | Project-scoped Claude/Codex memory and summary extraction for `--agent-context` |
@@ -631,6 +632,33 @@ From a terminal:
 ```sh
 <python> mcp_server.py --query "why did the build switch to clang?" --workdir ~/game
 ```
+
+### Agents without MCP
+
+Agents that only have a shell tool, such as DwarfStar's `ds4-agent`, call `bin/memory`, a thin
+client of the shared HTTP server (POSIX shells; it runs this checkout's `.venv`):
+
+```sh
+memory search "why did the build switch to clang?"   # routed by the current directory
+memory search -c personal -p ds4 "..."              # explicit context/project
+memory save "Title" <<'EOF'                         # note content comes from stdin
+...
+EOF
+memory contexts                                     # contexts, projects and document topics
+```
+
+It needs the warm server: a standalone process would load the model on every call (5-30 s).
+Like MCP clients, it works from any directory. When a call without `-c`/`-p` fails, typically
+because the directory has no route, the error also lists the contexts, so the agent can retry
+with an explicit selection without spending a turn on `memory contexts`.
+Search output is bounded to `MEMORY_MAX_CHARS` (default 3000) characters, shared equally between
+the results, because a small local model pays for every result token in prefill; `--max-chars 0`
+prints everything. `MEMORY_URL` selects the server, `MEMORY_CONTEXT` and `MEMORY_PROJECT` are
+defaults when no `-c`/`-p` is passed, and `MEMORY_AGENT` names the agent recorded on saved notes.
+Put `bin` on the agent's `PATH` and describe the command in its system prompt. Include the output
+of `memory contexts` there: without it, a small model cannot tell that a question such as "what
+is DUC?" belongs to a memory topic, and answers without searching. For `ds4-agent`, a launcher
+does all of this and passes the instructions with `-sys`.
 
 ## Settings (environment variables)
 

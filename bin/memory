@@ -1,0 +1,5 @@
+#!/bin/sh
+# Shell entry point of memory_cli.py for agents without MCP; runs it with this checkout's virtualenv.
+set -eu
+repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+exec "$repo/.venv/bin/python" "$repo/memory_cli.py" "$@"
