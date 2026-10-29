@@ -15,6 +15,8 @@ hook_directories.txt
 # Machine routing, private exports and deployment validation artifacts.
 /memory_routes.local.json
 /redis-containers.local.json
+/memory_sources.local.json
+/memory_sources.secrets.local.json
 /exports/
 /.migration/
 # Exported databases and private source corpora must never be committed.

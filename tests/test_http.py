@@ -140,7 +140,7 @@ class HttpIntegrationTests(unittest.TestCase):
                 sock.bind(('127.0.0.1', 0))
                 port = sock.getsockname()[1]
             base = f'http://127.0.0.1:{port}'
-            environment = dict(os.environ, MEMORY_INDEX=prefix, MEMORY_PROJECT='', HF_HUB_OFFLINE='1', MEMORY_ROUTES='')
+            environment = dict(os.environ, MEMORY_INDEX=prefix, MEMORY_PROJECT='', HF_HUB_OFFLINE='1', MEMORY_ROUTES='', MEMORY_SOURCES='')
             if explicit:
                 r.hset(prefix + ':meta', mapping={'corpus_domain': 'projects'})
                 routes = root / 'routes.json'
@@ -148,6 +148,14 @@ class HttpIntegrationTests(unittest.TestCase):
                     'projects': {'domain': 'projects', 'redis_url': store.REDIS_URL, 'read_only': False}},
                     'routes': []}))
                 environment['MEMORY_ROUTES'] = str(routes)
+                source_config = root / 'sources.json'
+                source_config.write_text(json.dumps({'schema': 1, 'sources': [{
+                    'id': 'fixture', 'context': 'projects', 'projects': ['alpha'], 'adapter': 'contract',
+                    'connection': {'transport': 'stdio', 'command': sys.executable,
+                        'args': [str(Path(__file__).with_name('source_fixture.py').resolve())],
+                        'env': {'SOURCE_TEST_CALLS': str(root / 'source-calls.jsonl')}},
+                    'allowed_tools': ['context_search', 'context_fetch']}]}))
+                environment['MEMORY_SOURCES'] = str(source_config)
             with (root / 'server.log').open('w+', encoding='utf-8') as log:
                 process = subprocess.Popen([sys.executable, '-u', str(Path(server.__file__).resolve()),
                     '--transport', 'streamable-http', '--port', str(port)], env=environment,
@@ -189,6 +197,11 @@ class HttpIntegrationTests(unittest.TestCase):
                                     text = found.content[0].text
                                     self.assertIn(f'Only {project.name}', text)
                                     self.assertNotIn(f'Only {projects[1 - n].name}', text)
+                                    if explicit and n == 0:
+                                        self.assertIn('"source": "fixture"', text)
+                                        self.assertIn('A current source statement.', text)
+                                    else:
+                                        self.assertNotIn('A current source statement.', text)
                         await asyncio.gather(client(0), client(1))
                         # Reconnect after both sessions ended; no client roots means workdir is required.
                         async with streamable_http_client(base + '/mcp') as (read, write, _):
@@ -215,7 +228,14 @@ class HttpIntegrationTests(unittest.TestCase):
                                     contexts = json.loads(catalog.content[0].text)['contexts']
                                     self.assertEqual(contexts, [{'context': 'projects', 'domain': 'projects',
                                         'read_only': False, 'project_required': True, 'projects': ['alpha', 'beta'],
-                                        'resources': {'alpha': ['gameplay.md'], 'beta': []}}])
+                                        'resources': {'alpha': ['gameplay.md'], 'beta': []},
+                                        'context_sources': [{'id': 'fixture', 'projects': ['alpha'], 'read_only': True}]}])
+                                    for project in ('alpha', 'beta'):
+                                        page = await session.call_tool('get_context_document', {
+                                            'source': 'fixture', 'id': 'page-1', 'context': 'projects', 'project': project})
+                                        self.assertEqual(page.isError, project == 'beta')
+                                        if project == 'alpha':
+                                            self.assertEqual(json.loads(page.content[0].text)['document']['version'], '7')
                                     for selection, error in [({'context': 'projects'}, 'requires an explicit project'),
                                                              ({'context': 'unknown', 'project': 'alpha'}, 'Unknown'),
                                                              ({'project': 'alpha'}, 'requires context')]:
@@ -239,6 +259,8 @@ class HttpIntegrationTests(unittest.TestCase):
                     self.assertEqual(log.read().count('Model ready in'), 1)
                     self.assertEqual(len(list(r.scan_iter(match=prefix + ':note:*'))), 2)
                     if explicit:
+                        source_calls = [json.loads(line) for line in (root / 'source-calls.jsonl').read_text().splitlines()]
+                        self.assertEqual({call['tool'] for call in source_calls}, {'context_search', 'context_fetch'})
                         for key in r.scan_iter(match=prefix + ':note:*'):
                             self.assertEqual(r.hmget(key, 'branch', 'worktree'), ['', ''])
                 finally:

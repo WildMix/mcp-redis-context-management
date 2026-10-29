@@ -1,5 +1,8 @@
 # MCP server (stdio / Streamable HTTP) — official Python SDK; FastMCP API of the 1.x line
 mcp==1.30.0
+# External-source transports and strict source/configuration contracts (also used by MCP).
+httpx==0.28.1
+pydantic==2.14.0
 
 # Redis client with the RediSearch (FT.*) command API
 redis==8.1.0

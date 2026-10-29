@@ -92,5 +92,9 @@ keep the full selection in the manifest. Search labels historical matches and th
 current replacements. `get_memory_history` optionally inspects earlier versions.
 Keep the configured model/index unchanged unless performing a deliberate revalidated migration.
 
+The runtime also supports optional external MCP context sources through `MEMORY_SOURCES`.
+Connection settings and credentials are machine-specific and are never included in this bundle.
+See the main repository's `docs/CONTEXT_SOURCES.md` for its read-only search/fetch contract.
+
 Keep this ZIP and extracted corpus within the intended audience. The database snapshot contains the
 whole isolated instance. Neither the ZIP nor its source documents belong in the generic tool's Git repo.

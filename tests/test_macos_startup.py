@@ -1,9 +1,43 @@
 """Exercise dependency failures without Docker, launchd or a loaded embedding model."""
 import os
+import importlib.util
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
+
+
+class MacStartupConfigurationTests(unittest.TestCase):
+    def setUp(self):
+        path = Path(__file__).resolve().parents[1] / "scripts/install-macos-autostart.py"
+        spec = importlib.util.spec_from_file_location("macos_installer", path)
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        self.installer = installer
+
+    def test_optional_sources_are_passed_without_credentials(self):
+        installer = self.installer
+        args = (Path("/repo"), Path("/venv/python"), "/bin/docker", Path("/routes"),
+                ["memory-db"], "colima", 8765, Path("/logs"))
+        self.assertNotIn("MEMORY_SOURCES", installer.launch_agent(*args)["EnvironmentVariables"])
+        env = installer.launch_agent(*args, sources=Path("/private/sources.json"))["EnvironmentVariables"]
+        self.assertEqual(env["MEMORY_SOURCES"], "/private/sources.json")
+        self.assertNotIn("CONFLUENCE_API_TOKEN", env)
+
+    def test_bootstrap_retries_unloading_job_but_not_other_errors(self):
+        failed = subprocess.CompletedProcess([], 5, '', 'still unloading')
+        ready = subprocess.CompletedProcess([], 0, '', '')
+        with patch.object(self.installer.subprocess, 'run', side_effect=[failed, ready]) as run, \
+                patch.object(self.installer.time, 'sleep'):
+            self.installer.bootstrap('gui/501', Path('/agent.plist'))
+            self.assertEqual(run.call_count, 2)
+        for code, attempts in ((5, 30), (78, 1)):
+            with patch.object(self.installer.subprocess, 'run', return_value=subprocess.CompletedProcess([], code, '', 'failed')) as run, \
+                    patch.object(self.installer.time, 'sleep'):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    self.installer.bootstrap('gui/501', Path('/agent.plist'))
+                self.assertEqual(run.call_count, attempts)
 
 
 @unittest.skipIf(os.name == "nt", "macOS launcher requires a POSIX shell")

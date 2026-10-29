@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "sources": [
+    {
+      "id": "reference-wiki",
+      "context": "reference",
+      "projects": ["platform"],
+      "adapter": "contract",
+      "connection": {
+        "transport": "streamable-http",
+        "url": "https://wiki-mcp.example.org/mcp",
+        "headers_from_environment": {"Authorization": "WIKI_AUTHORIZATION"}
+      },
+      "search_tool": "context_search",
+      "fetch_tool": "context_fetch",
+      "allowed_tools": ["context_search", "context_fetch"],
+      "timeout_seconds": 15,
+      "limit": 3
+    }
+  ]
+}

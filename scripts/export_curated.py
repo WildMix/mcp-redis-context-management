@@ -111,7 +111,7 @@ def main():
     runtime = output / "runtime"
     runtime.mkdir()
     for name in ("mcp_server.py", "memory_store.py", "memory_routing.py", "curated_corpus.py",
-                 "import_curated.py", "memory_history.py", "memory_relations.py", "requirements.txt"):
+                 "import_curated.py", "memory_history.py", "memory_relations.py", "memory_sources.py", "requirements.txt"):
         shutil.copyfile(ROOT / name, runtime / name)
     (runtime / "scripts").mkdir()
     shutil.copyfile(ROOT / "scripts/provision-models.py", runtime / "scripts/provision-models.py")

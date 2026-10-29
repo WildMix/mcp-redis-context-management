@@ -9,13 +9,27 @@ import plistlib
 import shutil
 import subprocess
 import sys
+import time
 
 LABEL = "local.project-memory.mcp"
 REPO = Path(__file__).resolve().parent.parent
 
 
+def bootstrap(domain: str, plist: Path) -> None:
+    """bootout returns before launchd has necessarily finished unloading the old job."""
+    command = ["launchctl", "bootstrap", domain, str(plist)]
+    for attempt in range(30):
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode == 0:
+            return
+        if result.returncode != 5 or attempt == 29:
+            raise subprocess.CalledProcessError(result.returncode, command, result.stdout, result.stderr)
+        time.sleep(0.5)
+
+
 def launch_agent(repo: Path, python: Path, docker: str, routes: Path,
-                 containers: list[str], context: str, port: int, logs: Path) -> dict:
+                 containers: list[str], context: str, port: int, logs: Path,
+                 sources: Path | None = None) -> dict:
     return {
         "Label": LABEL,
         "ProgramArguments": ["/bin/bash", str(repo / "scripts/start-memory-macos.sh"),
@@ -24,6 +38,7 @@ def launch_agent(repo: Path, python: Path, docker: str, routes: Path,
         "EnvironmentVariables": {
             "PATH": f"{Path(docker).parent}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
             "MEMORY_ROUTES": str(routes),
+            **({"MEMORY_SOURCES": str(sources)} if sources else {}),
             "PYTHONUNBUFFERED": "1",
             # Provision the model before installing. Startup must also work offline.
             "HF_HUB_OFFLINE": "1",
@@ -41,6 +56,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--routes", type=Path, default=REPO / "memory_routes.local.json")
     parser.add_argument("--containers", type=Path, default=REPO / "redis-containers.local.json")
+    parser.add_argument("--sources", type=Path, help="Optional external MCP source configuration")
     parser.add_argument("--docker-context", default="colima")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--dry-run", action="store_true", help="Print the plist without installing it")
@@ -61,12 +77,16 @@ def main():
     # Validate both routing and the existing containers before touching startup configuration.
     sys.path.insert(0, str(REPO))
     from memory_routing import Router
-    Router(routes)
+    router = Router(routes)
+    sources = args.sources.resolve(strict=True) if args.sources else None
+    if sources:
+        from memory_sources import SourceRegistry
+        SourceRegistry(sources, router)
     subprocess.run([docker, "--context", args.docker_context, "container", "inspect", *containers],
                    check=True, stdout=subprocess.DEVNULL)
     logs = Path.home() / "Library/Logs/project-memory"
     data = plistlib.dumps(launch_agent(REPO, python, docker, routes, containers,
-                                     args.docker_context, args.port, logs))
+                                     args.docker_context, args.port, logs, sources))
     if args.dry_run:
         print(data.decode(), end="")
         return
@@ -81,7 +101,7 @@ def main():
     plist.write_bytes(data)
     subprocess.run(["plutil", "-lint", str(plist)], check=True)
     subprocess.run(["launchctl", "enable", f"{domain}/{LABEL}"], check=True)
-    subprocess.run(["launchctl", "bootstrap", domain, str(plist)], check=True)
+    bootstrap(domain, plist)
     print(f"Installed {plist}; starts now and at sign-in. Project synchronization is not installed.")
     print(f"Logs: {logs}; readiness: http://127.0.0.1:{args.port}/health")
 

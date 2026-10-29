@@ -155,3 +155,25 @@ instance and stop the MCP LaunchAgent while running `memory_history.py --redis-u
 The migration preserves corpus text and embeddings; `/health` reports
 `memory_history: 1` and the loaded comparison model. See
 [memory history](MEMORY_HISTORY_PROPOSAL.md) for the complete procedure and limits.
+
+## External MCP context sources
+
+The optional `MEMORY_SOURCES` configuration attaches read-only sources to selected
+contexts/projects. See [the source contract](CONTEXT_SOURCES.md). Install or reinstall
+startup with the source configuration explicitly included:
+
+```sh
+.venv/bin/python scripts/install-macos-autostart.py --sources "$PWD/memory_sources.local.json"
+```
+
+The installer validates the source bindings before restarting the service. Pass the
+same `--sources` argument when reinstalling to preserve this integration. No Redis
+migration or source import is needed. `/health` reports the configured source count;
+actual source availability is checked on demand.
+
+Keep `memory_sources.local.json` and its credential file
+`memory_sources.secrets.local.json` private and owner-readable. Both files are
+ignored by Git and excluded from bundles. The Confluence adapter permits only
+`confluence_searchContent` and `confluence_getContent`; coding agents' independent
+Confluence connections retain their write tools. Configure a separately installed
+upstream executable and update its path if that installation moves or is removed.

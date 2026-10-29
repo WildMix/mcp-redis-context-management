@@ -5,18 +5,21 @@ and every git worktree all read and write the same memory. A background synchron
 documentation and saved agent context while Claude or Codex is open. Agents search that knowledge
 before starting work and can still save notes explicitly.
 
-- **`mcp_server.py`** serves MCP over stdio or a shared local HTTP connection, with three tools:
+- **`mcp_server.py`** serves MCP over stdio or a shared local HTTP connection, with these tools:
   - `list_memory_contexts()` lists configured contexts, their projects, document names and read-only status.
   - `search_project_memory(query)` returns the 3 entries of the current project most similar to the
-    query.
+    query, plus live reference material from any configured external MCP sources.
   - `save_to_project_memory(title, content)` stores a note.
+  - `get_memory_history(memory_id)` reads previous revisions.
+  - `get_context_document(source, id)` reads a longer external source page.
 - **`sync_memory.py`** watches local Claude/Codex clients and synchronizes configured projects on
   startup, every 15 minutes while a client is open, and once after the last client closes.
 - **`migrate_memory.py`** performs the incremental imports used by the synchronizer and can also be
   run manually. `--agent-context` includes project-scoped Claude/Codex memories and summaries.
 
 Entries live in a Redis Stack vector index (RediSearch, HNSW, cosine). They are embedded locally with
-`sentence-transformers/all-MiniLM-L6-v2` (384 dimensions), so nothing leaves the machine.
+`sentence-transformers/all-MiniLM-L6-v2` (384 dimensions), so embedding inference stays local. When external sources are configured, scoped search
+queries and document IDs are sent to those sources.
 
 ## How projects are told apart
 
@@ -44,7 +47,7 @@ in each relevant context/project, then combine the cited findings. Comparisons
 need evidence for each side, with additional searches when three results do not cover every part.
 Do not send the entire mixed question to one project, infer that a miss applies to other contexts,
 or ask the user to choose one scope when the question clearly requests several. Single-topic
-questions still use just the relevant scope; no database fallback or automatic fan-out occurs.
+questions still use just the relevant scope; no cross-context database or source fallback occurs.
 
 Without explicit selectors, the existing directory-based behavior below applies.
 
@@ -1016,3 +1019,12 @@ installations should back up Redis, stop writers and initialize version metadata
 with `memory_history.py --redis-url <configured-url>`, then restart their MCP server.
 See [memory history](docs/MEMORY_HISTORY_PROPOSAL.md) for behavior, limitations and
 migration instructions.
+
+## External context sources
+
+Set `MEMORY_SOURCES` to a source configuration to augment Redis searches with live,
+read-only MCP context. Sources are scoped to contexts/projects; their search/fetch
+tools follow a strict contract and explicit allowlist. External reads do not save
+pages or create memory revisions. Direct agent connections retain their own permissions.
+See [the source contract, configuration and Confluence adapter](docs/CONTEXT_SOURCES.md)
+and [memory_sources.example.json](memory_sources.example.json).

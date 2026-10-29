@@ -377,7 +377,8 @@ class RealModelTests(unittest.TestCase):
                         async with ClientSession(read, write) as session:
                             await session.initialize()
                             names = {tool.name for tool in (await session.list_tools()).tools}
-                            self.assertEqual(names, {"list_memory_contexts", "search_project_memory", "save_to_project_memory", "get_memory_history"})
+                            self.assertEqual(names, {"list_memory_contexts", "search_project_memory", "save_to_project_memory",
+                                                     "get_memory_history", "get_context_document"})
                             catalog = await session.call_tool("list_memory_contexts", {})
                             self.assertFalse(catalog.isError)
                             self.assertEqual(json.loads(catalog.content[0].text)["contexts"], [])
