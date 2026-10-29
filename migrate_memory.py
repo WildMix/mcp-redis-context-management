@@ -87,7 +87,7 @@ def drop_chunks(r, pipe, namespace: Namespace, path: Path | str) -> None:
 
 
 def import_dirs(r, roots: list[Path], project: str, *, literal_roots: tuple[Path, ...] = (), model_loader=None) -> dict:
-    if r.hget(META_KEY, "corpus_domain") in ("work", "personal"):
+    if r.hget(META_KEY, "corpus_domain"):
         raise ValueError("This is a curated destination; use import_curated.py with its reviewed manifest")
     check_model(r)
     namespace = namespace_of(r)
@@ -178,7 +178,7 @@ def import_dirs(r, roots: list[Path], project: str, *, literal_roots: tuple[Path
 
 def rebuild(r) -> None:
     """Stage a complete generation; publish only if no writer changed the source snapshot."""
-    if r.hget(META_KEY, "corpus_domain") in ("work", "personal"):
+    if r.hget(META_KEY, "corpus_domain"):
         raise ValueError("Revalidate the curated manifest and import into a fresh instance for a model change")
     model = load_model()
     with r.lock(f"{INDEX_NAME}:initialize", timeout=30, blocking_timeout=30):

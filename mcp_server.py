@@ -47,8 +47,8 @@ MAX_NOTE_CHARS = 6000
 
 SEARCH_GUIDANCE = (
     "For questions spanning multiple topics or projects, first use list_memory_contexts and its "
-    "resources to map each topic to the relevant context/project. A mixed work-and-personal question "
-    "requires separate search_project_memory calls with focused subqueries in BOTH contexts; "
+    "resources to map each topic to the relevant context/project. A question spanning contexts or projects "
+    "requires separate search_project_memory calls with focused subqueries in EVERY relevant context/project; "
     "do not send the whole mixed question to just one project or repeat it unchanged in every scope. "
     "Comparisons need evidence for each side, with additional focused searches if the top three "
     "results omit a part. Combine the findings, identifying each context/project and its sources. "
@@ -77,8 +77,6 @@ def destination(directory: str, *, writing: bool = False, context: str = "", pro
         if writing and target.read_only:
             raise ValueError("This corpus is read-only through MCP. Edit and publish its curated Markdown instead.")
         client = _router.connect(target)
-    if writing and client.hget(f"{INDEX_NAME}:meta", "corpus_domain") == "work":
-        raise ValueError("This work corpus is read-only through MCP. Edit and publish its curated Markdown instead.")
     return project, client
 
 
@@ -160,10 +158,10 @@ mcp = FastMCP(
     log_level="WARNING",  # the root logger, to stderr: keeps per-request and model-loading INFO lines out
     # Clients show these instructions even when they defer the tools, so they carry the rule on their own.
     instructions="Use list_memory_contexts to discover available memory. To access it from any directory, "
-                 "pass context (for example work or personal) and, for personal memory, project. "
+                 "pass context and, when required by that context, project. "
                  "Explicit selection takes precedence over workdir and client roots; no checkout is required. "
                  "Otherwise pass your absolute current project directory as workdir. Never guess an ambiguous "
-                 "context or personal project. " + SEARCH_GUIDANCE + " Work memory is read-only. "
+                 "context or project. " + SEARCH_GUIDANCE + " Each context defines its own read-only status. "
                  "CRITICAL: this server is the long-term memory of the project you are working in, shared by every "
                  "agent and worktree: notes earlier sessions saved about what they changed and decided, plus the "
                  "project's docs and handoffs. Call search_project_memory WHENEVER the user asks about the "
@@ -369,11 +367,11 @@ async def list_memory_contexts() -> str:
     No workdir or local checkout is needed. Use the returned context and project IDs with
     search_project_memory or save_to_project_memory. A fixed-project context needs only context;
     other contexts require an explicit project. The resources map shows which documents belong to
-    each project, including components grouped under one shared work project. Match the question's
-    topics to those resources, allowing common acronym/spelling variants. For mixed work/personal
-    questions, make separate focused search_project_memory calls in each relevant context/project
+    each project, including components grouped under one shared project. Match the question's
+    topics to those resources, allowing common acronym/spelling variants. For questions spanning contexts or projects,
+    make separate focused search_project_memory calls in each relevant context/project
     and combine the evidence. Do not choose only one scope for a clearly mixed question.
-    Personal saves can create a new project using a valid project ID.
+    Writable contexts can create a new project using a valid project ID.
     """
     if _router is None:
         return json.dumps({"contexts": [], "message": "This server uses directory selection. "
@@ -393,10 +391,10 @@ async def search_project_memory(query: str, ctx: Context, workdir: str = "",
     It searches the long-term memory of the project you are working in: notes other agents saved about
     what they changed and decided, and the project's docs (design notes, handoffs, earlier memory files).
     Worktree routes share a memory. A configured shared corpus can include related repositories;
-    work and personal domains are isolated. Select context/project to search from anywhere without
+    configured Redis contexts are isolated. Select context/project to search from anywhere without
     a local checkout. Otherwise unmapped directories are rejected in routed mode.
 
-    Each call searches ONLY ONE context/project. For a mixed work/personal question, first call
+    Each call searches ONLY ONE context/project. For a question spanning contexts/projects, first call
     list_memory_contexts to map topics using its resources, then split the question and search each
     relevant context/project separately with a focused subquery. For comparisons, retrieve evidence
     for each side. Do not send the full mixed question to just one project or treat its results as
@@ -411,8 +409,8 @@ async def search_project_memory(query: str, ctx: Context, workdir: str = "",
     Args:
         query: a focused question about this context/project; split mixed-topic requests into separate calls
         workdir: absolute project directory for automatic routing; ignored when context/project is supplied
-        context: context name from list_memory_contexts (e.g. work or personal); overrides directory routing
-        project: project ID in that context; required for personal memory (e.g. bodhidharma)
+        context: context name from list_memory_contexts; overrides directory routing
+        project: project ID in that context; required unless the context has a fixed project
     """
     directory = "" if context or project else await _directory(ctx, workdir)
     return await anyio.to_thread.run_sync(search, query, directory, context, project)
@@ -438,8 +436,8 @@ async def save_to_project_memory(title: str, content: str, ctx: Context, workdir
         title: one line naming what the note is about
         content: the note, in plain text or Markdown (at most 6000 characters)
         workdir: absolute project directory for automatic routing; ignored when context/project is supplied
-        context: context name from list_memory_contexts; work is read-only; personal allows saves
-        project: explicit project ID in the selected context; personal saves can create a new project
+        context: context name from list_memory_contexts; saves require read_only=false
+        project: explicit project ID in the selected context; writable contexts allow new projects
     """
     directory = "" if context or project else await _directory(ctx, workdir)
     client = ctx.session.client_params.clientInfo if ctx.session.client_params else None

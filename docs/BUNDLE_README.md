@@ -22,31 +22,33 @@ python restore.py
 If Docker runs inside the Ubuntu WSL distribution, use `python restore.py --wsl-distro Ubuntu`.
 The script verifies bundle checksums, refuses existing containers/volumes, restores to a fresh volume
 with AOF disabled, enables AOF, then recreates the container and verifies that the data survived.
-Defaults are container `project-memory-work-copy` and Redis port `6380`. Use `--name another-copy
+Defaults are container `project-memory-copy` and Redis port `6380`. Use `--name another-copy
 --port 6382` for a second installation or an occupied port. Redis is bound to localhost.
 
-The printed routing-file path belongs to this installation. The default work bundle maps all agent
-directories to its one shared project; it contains no personal database. Personal memory can be
-selected explicitly with `context="personal"` and a `project` ID, without any directory routes.
-Restore personal data with a distinct name and port, for example
-`python restore.py --name project-memory-personal-copy --port 6381`. For optional automatic selection
-by directory, add one route per project to `project-memory-personal-copy.routes.json`:
+The printed routing-file path belongs to this installation. The context name defaults to the
+bundle's corpus label; override it with `--context <name>`. All restored targets default to
+`read_only: true`; use `--writable` to permit explicit MCP saves, or edit `read_only` later and
+restart the server. Labels and context names never determine write permissions.
+
+A bundle exported with a fixed project can be selected without a project argument. Otherwise pass
+`project` explicitly. For optional automatic directory selection, add routes using your checkout
+paths, context name and exact project values from the manifest:
 
 ```json
-{"root": "C:/projects/my-game", "target": "personal", "project": "<project value from manifest.json>"}
+{"root": "C:/projects/my-game", "target": "projects", "project": "game"}
 ```
 
-Use your new computer's checkout paths and the exact project values in the manifest. Linked worktrees
-inherit their main checkout's route. To serve both restored instances from one MCP process, combine
-their two targets and all explicit routes into one routing file; remove `default_target` and add
-your work checkout root as a route to the work target. Point `MEMORY_ROUTES` to this combined file.
+Linked worktrees inherit their main checkout's route. Restore additional corpora with distinct
+container names and ports. To serve them from one MCP process, combine their targets and routes
+in one routing file and remove `default_target`. Keep existing container names and volumes when
+upgrading; the generic example names do not rename existing installations.
 
 ## Start the MCP server
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\python -m pip install -r runtime/requirements.txt
-$env:MEMORY_ROUTES = (Resolve-Path project-memory-work-copy.routes.json).Path
+$env:MEMORY_ROUTES = (Resolve-Path project-memory-copy.routes.json).Path
 .venv\Scripts\python runtime/mcp_server.py --transport streamable-http --port 8765
 ```
 
@@ -59,10 +61,10 @@ is already occupied.
 Register an HTTP MCP server named `project-memory` in your agent, with URL
 `http://127.0.0.1:8765/mcp`. Use the port you selected. No credentials are required for this local
 endpoint. Call `list_memory_contexts` to discover contexts/projects, then `search_project_memory`
-with `context="work"`, or with `context="personal"` and `project="<project ID>"`, from any directory.
-`save_to_project_memory` accepts the same selectors; work saves are rejected. Without selectors,
+with a discovered `context` and `project` when required, from any directory.
+`save_to_project_memory` accepts the same selectors and requires a writable target. Without selectors,
 pass an existing absolute project directory as `workdir` for automatic routing.
-Work searches cover the entire shared corpus, including relationships between repositories.
+Fixed-project searches cover the entire shared corpus, including relationships between repositories.
 
 To test without an MCP client, in a second PowerShell window with the same environment:
 
@@ -75,7 +77,7 @@ the restore script and MCP runtime otherwise work the same way.
 
 ## Source documents and maintenance
 
-Search results cite portable paths such as `work/library.md`, relative to this extracted directory.
+Search results cite portable paths such as `library.md`, relative to the manifest’s corpus root.
 The snapshot already includes their text and embeddings; repositories need not be cloned to search.
 Treat the Markdown as a curated architectural reference. Review it against current code when design
 changes; a durable reference is not a guarantee that every future implementation remains unchanged.

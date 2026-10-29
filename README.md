@@ -24,23 +24,23 @@ With `MEMORY_ROUTES` configured, select memory from **any directory**, without a
 Call `list_memory_contexts()` to discover context and project names, then:
 
 ```text
-search_project_memory(query="How are builds executed?", context="work")
-search_project_memory(query="How does stillness work?", context="personal", project="bodhidharma")
-save_to_project_memory(title="A decision", content="...", context="personal", project="bodhidharma")
+search_project_memory(query="How are builds executed?", context="reference")
+search_project_memory(query="Why was this design chosen?", context="projects", project="game")
+save_to_project_memory(title="A decision", content="...", context="projects", project="game")
 ```
 
-`context` names a configured target. Work uses its fixed shared project and remains read-only.
-Personal contexts without a fixed project require `project`; a valid new project ID can receive
-notes without a directory route. Explicit selection overrides `workdir` and client roots and never
-searches another database on a miss. Unknown contexts, missing personal project IDs and conflicting
+`context` names a user-defined Redis target. Each target independently sets `read_only` (default true)
+and may optionally set a fixed `project`. Targets without a fixed project require `project`; writable
+targets accept notes for a valid new project ID. Notes can be saved
+without a directory route. Explicit selection overrides `workdir` and client roots and never
+searches another database on a miss. Unknown contexts, missing required project IDs and conflicting
 fixed project IDs fail. These saves omit branch/worktree provenance because the caller may be in an
 unrelated checkout. Discovery lists both stored and routed project IDs, with a `resources` map
 from each project to its source documents. This exposes components grouped under a shared corpus
 instead of requiring agents to recognize only its umbrella project name.
 
-For a question mixing work and personal topics, use that catalog to split it into focused searches
-in each relevant context/project, then combine the cited findings. For example, search the personal
-game's gameplay in its project and the work platform's deployment in the work context. Comparisons
+For a question spanning contexts or projects, use that catalog to split it into focused searches
+in each relevant context/project, then combine the cited findings. Comparisons
 need evidence for each side, with additional searches when three results do not cover every part.
 Do not send the entire mixed question to one project, infer that a miss applies to other contexts,
 or ask the user to choose one scope when the question clearly requests several. Single-topic
@@ -103,7 +103,7 @@ would pin every client to one project; use repository-local `project-memory.id` 
 
 ## 1. Start Redis
 
-For a Mac restoring separate personal and work exports, follow
+For a Mac restoring multiple isolated corpus exports, follow
 [the macOS setup](docs/MACOS_SETUP.md). It runs both Redis instances and one shared MCP/model
 process at sign-in, with project synchronization disabled.
 
@@ -400,18 +400,18 @@ These timestamps describe file synchronization, not verification of the claims i
 The synchronizer does not regenerate a Markdown summary when underlying code changes. Before
 importing a gathered corpus, follow [Curated context and freshness](CONTEXT_CURATION.md): select
 durable knowledge, retain implementation dumps as evidence, and keep machine paths and revisions
-separate from embedded content. Work context explains shared architecture, technical behavior and
+separate from embedded content. Curated context explains shared architecture, technical behavior and
 source-checked run/test workflows; review it when the design or documented entry points change.
 Curated pages use one complete H2 topic per retrieval chunk. The offline
 [curated preview workflow](CONTEXT_CURATION.md#explicit-selection-and-offline-preview) checks an explicit
 reviewed-file selection with the production chunker and cached model tokenizer before any Redis import.
-It does not need per-commit summary regeneration. Personal context can use a separate,
+It does not need per-commit summary regeneration. Other corpora can use a separate,
 more automated maintenance policy. Portable source reconciliation and any future code-derived
 summary refresh are not implemented by the current sync job.
 
-For separate work/personal instances and reviewed, portable imports, use the
+For multiple user-defined Redis instances and reviewed, portable imports, use the
 [isolated migration workflow](CONTEXT_CURATION.md#publish-to-independent-instances). It includes
-explicit MCP routing, read-only work access and a ZIP exporter with a tested restore workflow.
+explicit MCP routing, per-context write permissions and a ZIP exporter with a tested restore workflow.
 This is an alternative to the broad automatic source collector described above.
 
 ## 5. Import or synchronize context manually
@@ -595,7 +595,7 @@ and the timestamps below. No agent turn should be interrupted for a memory revie
 | Searches show another project, or miss what you saved | Check the project named in the result header and pass the absolute project directory as `workdir`. Check repository-local `project-memory.id` if folder names collide. `MEMORY_PROJECT` is only supported for per-client stdio/CLI. |
 | Shared HTTP cannot connect | Check `ProjectMemory-MCP`, `/health` and the stderr log in section 3; allow startup warmup time. Restart clients after changing their transport or restarting the server. |
 | Shared HTTP asks for `workdir` | Select `context` and `project`, or pass an existing absolute project directory. The shared process cannot use its own directory as the client's project. |
-| `No memory route for this directory` | Call `list_memory_contexts`, then select `context` (and `project` for personal memory) to use memory from anywhere. Directory routes remain an optional convenience; see [context selection](CONTEXT_CURATION.md#select-context-from-any-directory). |
+| `No memory route for this directory` | Call `list_memory_contexts`, then select `context` (and `project` when required) to use memory from anywhere. Directory routes remain an optional convenience; see [context selection](CONTEXT_CURATION.md#select-context-from-any-directory). |
 | Documents are stale | Check `sync_memory.py --status`, the project scope in `sync_projects.json`, and the sync logs. An `error` status preserves the previous success time. |
 
 ## Using it
@@ -640,7 +640,7 @@ client of the shared HTTP server (POSIX shells; it runs this checkout's `.venv`)
 
 ```sh
 memory search "why did the build switch to clang?"   # routed by the current directory
-memory search -c personal -p ds4 "..."              # explicit context/project
+memory search -c projects -p game "..."              # explicit context/project
 memory save "Title" <<'EOF'                         # note content comes from stdin
 ...
 EOF

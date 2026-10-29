@@ -6,7 +6,7 @@ Use the shared `project-memory` MCP server:
   Explicit selection needs no checkout; `workdir` remains available for automatic directory routing.
 - For questions spanning contexts/projects, use the catalog's resource names to map each topic,
   then make separate focused searches in every relevant scope and combine the cited findings.
-  A mixed work/personal question requires both; do not force the user to choose just one context.
+  A question spanning contexts/projects requires each relevant scope; do not force the user to choose just one context.
   Comparisons need evidence for each side. A miss in one scope does not establish absence elsewhere.
 - Call `search_project_memory` before answering, planning or editing in an unfamiliar project area.
   Rephrase missed searches, read cited docs, and check historical notes against current code.

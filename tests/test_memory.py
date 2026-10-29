@@ -91,6 +91,7 @@ class ScanTests(unittest.TestCase):
     def test_scan_error_never_prunes_existing_records(self):
         with tempfile.TemporaryDirectory() as tmp:
             r = MagicMock()
+            r.hget.return_value = None
             r.hgetall.return_value = {str(Path(tmp) / "README.md"): "digest"}
             with patch.object(migrate, "check_model"), patch.object(migrate, "markdown_files", side_effect=RuntimeError("Git failed")):
                 with self.assertRaises(RuntimeError):

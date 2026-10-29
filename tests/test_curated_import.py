@@ -21,10 +21,10 @@ class RouterTests(unittest.TestCase):
         self.config = self.root / "routes.json"
         self.enterContext(patch("memory_routing.git", return_value=""))
         self.data = {"schema": 1, "targets": {
-            "work": {"domain": "work", "redis_url": "redis://localhost:6380/0", "project": "platform", "read_only": True},
-            "personal": {"domain": "personal", "redis_url": "redis://localhost:6381/0", "read_only": False}},
-            "routes": [{"root": str(self.root / "work"), "target": "work"},
-                       {"root": str(self.root / "game"), "target": "personal", "project": "game"}]}
+            "reference": {"domain": "reference", "redis_url": "redis://localhost:6380/0", "project": "platform", "read_only": True},
+            "projects": {"domain": "projects", "redis_url": "redis://localhost:6381/0", "read_only": False}},
+            "routes": [{"root": str(self.root / "reference"), "target": "reference"},
+                       {"root": str(self.root / "game"), "target": "projects", "project": "game"}]}
 
     def router(self):
         self.config.write_text(json.dumps(self.data), encoding="utf-8")
@@ -32,9 +32,9 @@ class RouterTests(unittest.TestCase):
 
     def test_explicit_domain_and_project_without_prefix_leak(self):
         router = self.router()
-        self.assertEqual(router.resolve(str(self.root / "work" / "src"))[1], "platform")
-        self.assertEqual(router.resolve(str(self.root / "game"))[0].domain, "personal")
-        for path in ("work-other", "unmapped"):
+        self.assertEqual(router.resolve(str(self.root / "reference" / "src"))[1], "platform")
+        self.assertEqual(router.resolve(str(self.root / "game"))[0].domain, "projects")
+        for path in ("reference-other", "unmapped"):
             with self.assertRaisesRegex(ValueError, "No memory route"):
                 router.resolve(str(self.root / path))
 
@@ -43,33 +43,33 @@ class RouterTests(unittest.TestCase):
         with patch("memory_routing.git", return_value=str(self.root / "game" / ".git")):
             self.assertEqual(router.resolve(str(self.root / "new-worktree"))[1], "game")
             with self.assertRaisesRegex(ValueError, "Conflicting"):
-                router.resolve(str(self.root / "work"))
+                router.resolve(str(self.root / "reference"))
 
-    def test_work_write_rejected_before_connecting(self):
+    def test_read_only_write_rejected_before_connecting(self):
         router = self.router()
         with patch.object(server, "_router", router), patch.object(router, "connect") as connect:
             with self.assertRaisesRegex(ValueError, "read-only"):
-                server.save("Title", "Text", str(self.root / "work"), "test")
+                server.save("Title", "Text", str(self.root / "reference"), "test")
             connect.assert_not_called()
 
     def test_explicit_selection_needs_no_directory_and_keeps_fixed_scope(self):
         router = self.router()
         with patch("memory_routing.git") as git:
-            self.assertEqual(router.select("work")[1], "platform")
-            self.assertEqual(router.select("personal", "Game")[1], "game")
-            self.assertEqual(router.select("personal", "new-project")[1], "new-project")
+            self.assertEqual(router.select("reference")[1], "platform")
+            self.assertEqual(router.select("projects", "Game")[1], "game")
+            self.assertEqual(router.select("projects", "new-project")[1], "new-project")
             git.assert_not_called()
-        for context, project, error in (("work", "game", "fixed"), ("unknown", "game", "Unknown"),
-                                         ("personal", "", "requires"), ("", "game", "requires context"),
-                                         ("personal", "*", "1-128")):
+        for context, project, error in (("reference", "game", "fixed"), ("unknown", "game", "Unknown"),
+                                         ("projects", "", "requires"), ("", "game", "requires context"),
+                                         ("projects", "*", "1-128")):
             with self.subTest(context=context, project=project), self.assertRaisesRegex(ValueError, error):
                 router.select(context, project)
 
-    def test_explicit_work_save_rejected_even_from_personal_directory(self):
+    def test_explicit_read_only_save_rejected_even_from_writable_directory(self):
         router = self.router()
         with patch.object(server, "_router", router), patch.object(router, "connect") as connect:
             with self.assertRaisesRegex(ValueError, "read-only"):
-                server.save("Title", "Text", str(self.root / "game"), "test", context="work")
+                server.save("Title", "Text", str(self.root / "game"), "test", context="reference")
             connect.assert_not_called()
 
     def test_catalog_lists_stored_projects_without_routes(self):
@@ -79,31 +79,31 @@ class RouterTests(unittest.TestCase):
             connect.return_value.ft.return_value.tagvals.return_value = ["archived-project", "game"]
             connect.return_value.ft.return_value.search.return_value = SimpleNamespace(docs=[], total=0)
             contexts = {item["context"]: item for item in router.contexts()}
-        self.assertEqual(contexts["work"]["projects"], ["platform"])
-        self.assertTrue(contexts["work"]["read_only"])
-        self.assertFalse(contexts["work"]["project_required"])
-        self.assertEqual(contexts["personal"]["projects"], ["archived-project", "game"])
-        self.assertTrue(contexts["personal"]["project_required"])
+        self.assertEqual(contexts["reference"]["projects"], ["platform"])
+        self.assertTrue(contexts["reference"]["read_only"])
+        self.assertFalse(contexts["reference"]["project_required"])
+        self.assertEqual(contexts["projects"]["projects"], ["archived-project", "game"])
+        self.assertTrue(contexts["projects"]["project_required"])
 
     def test_catalog_maps_resources_to_projects_and_deduplicates_paged_chunks(self):
         router = self.router()
-        work, personal = MagicMock(), MagicMock()
-        for client in (work, personal):
+        reference, projects = MagicMock(), MagicMock()
+        for client in (reference, projects):
             client.hget.return_value = ""
-        work.ft.return_value.search.side_effect = [
+        reference.ft.return_value.search.side_effect = [
             SimpleNamespace(total=3, docs=[SimpleNamespace(project="platform", source="COMPONENT-A.md")]*2),
             SimpleNamespace(total=3, docs=[SimpleNamespace(project="platform", source="COMPONENT-B.md")])]
-        personal.ft.return_value.tagvals.return_value = ["game", "archived"]
-        personal.ft.return_value.search.return_value = SimpleNamespace(total=2, docs=[
+        projects.ft.return_value.tagvals.return_value = ["game", "archived"]
+        projects.ft.return_value.search.return_value = SimpleNamespace(total=2, docs=[
             SimpleNamespace(project="game", source="gameplay.md"),
             SimpleNamespace(project="archived", source="design.md")])
-        with patch.object(router, "connect", side_effect=[work, personal]), \
+        with patch.object(router, "connect", side_effect=[reference, projects]), \
                 patch("memory_routing.index_exists", return_value=True):
             contexts = {item["context"]: item for item in router.contexts()}
-        self.assertEqual(contexts["work"]["resources"], {"platform": ["COMPONENT-A.md", "COMPONENT-B.md"]})
-        self.assertEqual(contexts["personal"]["resources"], {"archived": ["design.md"], "game": ["gameplay.md"]})
-        self.assertEqual(work.ft.return_value.search.call_count, 2)
-        for call in work.ft.return_value.search.call_args_list:
+        self.assertEqual(contexts["reference"]["resources"], {"platform": ["COMPONENT-A.md", "COMPONENT-B.md"]})
+        self.assertEqual(contexts["projects"]["resources"], {"archived": ["design.md"], "game": ["gameplay.md"]})
+        self.assertEqual(reference.ft.return_value.search.call_count, 2)
+        for call in reference.ft.return_value.search.call_args_list:
             args = call.args[0].get_args()
             self.assertEqual(args[0], "@kind:{doc} @project:{platform}")
             fields = args.index("RETURN")
@@ -112,23 +112,59 @@ class RouterTests(unittest.TestCase):
     def test_explicit_selection_requires_routing_configuration(self):
         with patch.object(server, "_router", None), patch.object(server, "connect") as connect:
             with self.assertRaisesRegex(ValueError, "require MEMORY_ROUTES"):
-                server.destination(str(self.root), context="personal", project="game")
+                server.destination(str(self.root), context="projects", project="game")
             connect.assert_not_called()
 
     def test_default_only_for_single_fixed_scope(self):
-        self.data["default_target"] = "work"
+        self.data["default_target"] = "reference"
         with self.assertRaisesRegex(ValueError, "only for one"):
             self.router()
-        del self.data["targets"]["personal"]
+        del self.data["targets"]["projects"]
         self.data["routes"] = []
         self.assertEqual(self.router().resolve(str(self.root))[1], "platform")
 
-    def test_work_cannot_be_writable_or_share_instance(self):
-        self.data["targets"]["work"]["read_only"] = False
-        with self.assertRaisesRegex(ValueError, "read_only"):
-            self.router()
-        self.data["targets"]["work"]["read_only"] = True
-        self.data["targets"]["personal"]["redis_url"] = "redis://localhost:6380/0"
+    def test_permissions_are_independent_of_context_and_domain_names(self):
+        for domain in ("work", "personal", "custom-corpus"):
+            with self.subTest(domain=domain):
+                self.data["targets"]["reference"].update(domain=domain, read_only=False)
+                router = self.router()
+                client = MagicMock()
+                client.hget.return_value = domain
+                with patch.object(server, "_router", router), patch.object(router, "connect", return_value=client):
+                    self.assertEqual(server.destination("", writing=True, context="reference"), ("platform", client))
+                self.data["targets"]["reference"]["read_only"] = True
+                router = self.router()
+                with patch.object(server, "_router", router), patch.object(router, "connect") as connect:
+                    with self.assertRaisesRegex(ValueError, "read-only"):
+                        server.destination("", writing=True, context="reference")
+                    connect.assert_not_called()
+
+    def test_optional_corpus_label_and_default_read_only(self):
+        self.data["targets"]["archive"] = {"redis_url": "redis://localhost:6382/0"}
+        router = self.router()
+        self.assertTrue(router.targets["archive"].read_only)
+        client = MagicMock()
+        client.hget.return_value = None
+        with patch("memory_routing.redis.Redis.from_url", return_value=client), patch("memory_routing.check_model"):
+            self.assertIs(router.connect(router.targets["archive"]), client)
+        client.hget.assert_not_called()
+
+    def test_labeled_target_checks_corpus_identity(self):
+        router = self.router()
+        client = MagicMock()
+        client.hget.return_value = "wrong-corpus"
+        with patch("memory_routing.redis.Redis.from_url", return_value=client):
+            with self.assertRaisesRegex(RuntimeError, "domain does not match"):
+                router.connect(router.targets["reference"])
+
+    def test_invalid_corpus_labels_are_rejected(self):
+        for domain in ("../escape", None, 3):
+            self.data["targets"]["reference"]["domain"] = domain
+            with self.subTest(domain=domain), self.assertRaises(ValueError):
+                self.router()
+
+    def test_targets_cannot_share_instance(self):
+        self.data["targets"]["projects"]["redis_url"] = "redis://localhost:6380/0"
         with self.assertRaisesRegex(ValueError, "separate"):
             self.router()
 
@@ -142,7 +178,7 @@ class CuratedImportTests(unittest.TestCase):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
         self.manifest = self.root / "manifest.json"
 
-    def write(self, text="# Example\n## Role\nOriginal purpose.\n## Tests\nRun the tests.\n", domain="personal"):
+    def write(self, text="# Example\n## Role\nOriginal purpose.\n## Tests\nRun the tests.\n", domain="projects"):
         file = self.root / "guide.md"
         file.write_text(text, encoding="utf-8")
         self.manifest.write_text(json.dumps({"schema": 1, "domain": domain, "corpus_root": ".",
@@ -155,13 +191,13 @@ class CuratedImportTests(unittest.TestCase):
     def publish(self):
         return import_curated.publish(self.r, self.manifest, self.model)
 
-    def test_replace_remove_move_and_unchanged_preserve_personal_notes(self):
+    def test_replace_remove_move_and_unchanged_preserve_agent_notes(self):
         self.write()
         self.assertEqual(self.publish()["chunks"], 2)
         old_keys = set(self.docs())
         with patch.object(store, "encode", side_effect=AssertionError("Unchanged import re-embedded")):
             self.assertEqual(self.publish()["status"], "unchanged")
-        server.save("Decision", "A lasting personal decision.", str(self.root), "test")
+        server.save("Decision", "A lasting design decision.", str(self.root), "test")
         self.write("# Example\n## Role\nReplacement purpose.\n")
         self.publish()
         self.assertEqual(list(self.docs().values()), ["Replacement purpose."])
@@ -190,17 +226,16 @@ class CuratedImportTests(unittest.TestCase):
         self.assertEqual(self.docs(), old)
 
     def test_domain_guard_and_legacy_writers(self):
-        self.write(domain="work")
+        self.write(domain="reference")
         self.publish()
-        with self.assertRaisesRegex(ValueError, "read-only"):
-            server.save("Decision", "Do not write work notes.", str(self.root), "test")
+        server.save("Decision", "Explicit saves are independent of the corpus label.", str(self.root), "test")
         from migrate_memory import import_dirs, rebuild
         with self.assertRaisesRegex(ValueError, "curated"):
             import_dirs(self.r, [self.root], "example")
         with self.assertRaisesRegex(ValueError, "curated"):
             rebuild(self.r)
-        self.write(domain="personal")
-        with self.assertRaisesRegex(ValueError, "other corpus"):
+        self.write(domain="projects")
+        with self.assertRaisesRegex(ValueError, "different corpus"):
             self.publish()
 
     def test_mixed_destination_is_rejected(self):

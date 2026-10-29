@@ -61,7 +61,8 @@ def prepare(manifest_path: Path, model) -> dict:
     """
     manifest_path = manifest_path.resolve()
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("schema") != 1 or manifest.get("domain") not in ("work", "personal"):
+    if manifest.get("schema") != 1 or not isinstance(manifest.get("domain"), str) or not re.fullmatch(
+            r"[a-z0-9][a-z0-9_.-]{0,127}", manifest["domain"]):
         raise ValueError("Expected a schema 1, single-domain curated manifest")
     domain = manifest["domain"]
     root = (manifest_path.parent / manifest["corpus_root"]).resolve(strict=True)
@@ -86,7 +87,7 @@ def prepare(manifest_path: Path, model) -> dict:
         text = data.decode("utf-8")
         expected = topic_headings(text)
         # The instance/route carries isolation; citations name the portable corpus
-        # document, without leaking a local folder or work/personal classification.
+        # document, without leaking a local folder or corpus classification.
         source = relative.as_posix()
         raw = chunk_markdown(text)
         fitted = fit_chunks(model, "doc", source, raw)

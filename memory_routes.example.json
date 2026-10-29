@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "targets": {
-    "work": {"redis_url": "redis://127.0.0.1:6380/0", "domain": "work", "project": "platform", "read_only": true},
-    "personal": {"redis_url": "redis://127.0.0.1:6381/0", "domain": "personal", "read_only": false}
+    "reference": {"redis_url": "redis://127.0.0.1:6380/0", "domain": "reference", "project": "platform", "read_only": true},
+    "projects": {"redis_url": "redis://127.0.0.1:6381/0", "domain": "projects", "read_only": false}
   },
   "routes": [
-    {"root": "C:/projects/work/application", "target": "work"},
-    {"root": "C:/projects/personal/game", "target": "personal", "project": "game"}
+    {"root": "C:/projects/reference/application", "target": "reference"},
+    {"root": "C:/projects/projects/game", "target": "projects", "project": "game"}
   ]
 }

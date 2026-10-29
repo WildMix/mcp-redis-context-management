@@ -33,16 +33,16 @@ class Router:
         endpoints = set()
         for name, value in config["targets"].items():
             url = urlparse(value["redis_url"])
-            domain = value["domain"]
+            domain = value.get("domain", "")
             project = value.get("project", "")
             read_only = value.get("read_only", True)
             if (url.scheme not in ("redis", "rediss") or not url.hostname
                     or url.path not in ("", "/0") or url.query or url.fragment
-                    or domain not in ("work", "personal") or not isinstance(read_only, bool)
+                    or not isinstance(domain, str)
+                    or (domain and not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,127}", domain))
+                    or not isinstance(read_only, bool)
                     or (project and not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,127}", project))):
                 raise ValueError("Invalid routing target: " + name)
-            if domain == "work" and (not read_only or not project):
-                raise ValueError("A work target requires read_only=true and a fixed project")
             endpoint = (url.hostname.lower(), url.port or 6379)
             if endpoint in endpoints:
                 raise ValueError("Targets must use separate Redis instances")
@@ -93,7 +93,7 @@ class Router:
             target = self.targets[self.default]
             return target, target.project
         raise ValueError("No memory route for this directory. Use list_memory_contexts and pass context "
-                         "(plus project for personal memory), or add a mapping to MEMORY_ROUTES; no database was searched.")
+                         "(plus project when required), or add a mapping to MEMORY_ROUTES; no database was searched.")
 
     def select(self, context: str, project: str = "") -> tuple[Target, str]:
         """Select one configured database without consulting the filesystem or client roots."""
@@ -157,7 +157,7 @@ class Router:
                                                                 socket_connect_timeout=3, socket_timeout=30)
             client = self.clients[target.name]
         client.ping()
-        if client.hget(META_KEY, "corpus_domain") != target.domain:
+        if target.domain and client.hget(META_KEY, "corpus_domain") != target.domain:
             raise RuntimeError("Redis corpus domain does not match routing target " + target.name)
         check_model(client)
         return client

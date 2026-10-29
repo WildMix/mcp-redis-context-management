@@ -11,7 +11,7 @@ from mcp import types
 import memory_cli as cli
 
 CATALOG = json.dumps({'contexts': [
-    {'context': 'work', 'read_only': True, 'project_required': False, 'projects': ['nova']}]})
+    {'context': 'reference', 'read_only': True, 'project_required': False, 'projects': ['nova']}]})
 
 
 class BoundedTests(unittest.TestCase):
@@ -38,22 +38,22 @@ class BoundedTests(unittest.TestCase):
 class ContextsTests(unittest.TestCase):
     def test_one_line_per_context(self):
         payload = json.dumps({'search_guidance': 'long text', 'contexts': [
-            {'context': 'work', 'read_only': True, 'project_required': False, 'projects': ['nova']},
-            {'context': 'personal', 'read_only': False, 'project_required': True, 'projects': []}]})
+            {'context': 'reference', 'read_only': True, 'project_required': False, 'projects': ['nova']},
+            {'context': 'projects', 'read_only': False, 'project_required': True, 'projects': []}]})
         self.assertEqual(cli.describe_contexts(payload),
-                         'work (read-only, -c work): nova\n'
-                         'personal (writable, -c personal -p <project>): no projects yet')
+                         'reference (read-only, -c reference): nova\n'
+                         'projects (writable, -c projects -p <project>): no projects yet')
 
     def test_document_topics_name_what_each_project_covers(self):
         payload = json.dumps({'contexts': [
-            {'context': 'work', 'read_only': True, 'project_required': False, 'projects': ['nova'],
+            {'context': 'reference', 'read_only': True, 'project_required': False, 'projects': ['nova'],
              'resources': {'nova': ['CAT.md', 'docs/DUC.md']}},
-            {'context': 'personal', 'read_only': False, 'project_required': True,
+            {'context': 'projects', 'read_only': False, 'project_required': True,
              'projects': ['scribe', 'hub', 'memory'],
-             'resources': {'scribe': ['personal/Scribe.md'], 'hub': ['personal/hub.md', 'personal/api.md'], 'memory': []}}]})
+             'resources': {'scribe': ['projects/Scribe.md'], 'hub': ['projects/hub.md', 'projects/api.md'], 'memory': []}}]})
         self.assertEqual(cli.describe_contexts(payload),
-                         'work (read-only, -c work): nova [CAT, DUC]\n'
-                         'personal (writable, -c personal -p <project>): scribe, hub [api], memory')
+                         'reference (read-only, -c reference): nova [CAT, DUC]\n'
+                         'projects (writable, -c projects -p <project>): scribe, hub [api], memory')
 
     def test_unrouted_server_message(self):
         self.assertEqual(cli.describe_contexts(json.dumps({'contexts': [], 'message': 'pass workdir'})), 'pass workdir')
@@ -61,9 +61,9 @@ class ContextsTests(unittest.TestCase):
 
 class SelectionTests(unittest.TestCase):
     def test_flags_override_environment_and_directory(self):
-        with patch.dict(os.environ, {'MEMORY_CONTEXT': 'personal', 'MEMORY_PROJECT': 'ds4'}):
-            self.assertEqual(cli.selection('work', ''), {'context': 'work', 'project': ''})
-            self.assertEqual(cli.selection('', ''), {'context': 'personal', 'project': 'ds4'})
+        with patch.dict(os.environ, {'MEMORY_CONTEXT': 'projects', 'MEMORY_PROJECT': 'ds4'}):
+            self.assertEqual(cli.selection('reference', ''), {'context': 'reference', 'project': ''})
+            self.assertEqual(cli.selection('', ''), {'context': 'projects', 'project': 'ds4'})
 
     def test_directory_routing_without_selectors(self):
         with patch.dict(os.environ, {'MEMORY_CONTEXT': '', 'MEMORY_PROJECT': ''}):
@@ -108,13 +108,13 @@ class RetryHintTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(cli.ToolError) as raised:
             await cli.call('search_project_memory', {'query': 'q', 'workdir': '/tmp'})
         self.assertEqual(str(raised.exception), 'No memory route for this directory.\n'
-                         'Retry with -c <context> -p <project>:\nwork (read-only, -c work): nova')
+                         'Retry with -c <context> -p <project>:\nreference (read-only, -c reference): nova')
         self.assertEqual(session.calls, ['search_project_memory', 'list_memory_contexts'])
 
     async def test_explicit_selection_failure_is_left_alone(self):
         session = self.session({'save_to_project_memory': ('This corpus is read-only.', True)})
         with self.assertRaises(cli.ToolError) as raised:
-            await cli.call('save_to_project_memory', {'title': 't', 'content': 'c', 'context': 'work', 'project': ''})
+            await cli.call('save_to_project_memory', {'title': 't', 'content': 'c', 'context': 'reference', 'project': ''})
         self.assertEqual(str(raised.exception), 'This corpus is read-only.')
         self.assertEqual(session.calls, ['save_to_project_memory'])
 

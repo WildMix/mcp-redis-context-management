@@ -1,7 +1,7 @@
 """Publish one reviewed corpus to an explicitly selected, dedicated Redis instance.
 
 Only manifest-selected Markdown is read. Whole-corpus replacement is atomic,
-portable across machines, and preserves independently saved personal notes.
+portable across machines, and preserves independently saved agent notes.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def publish(r, manifest: Path, model) -> dict:
     with r.lock(f"{store.INDEX_NAME}:curated-publish", timeout=300, blocking_timeout=5):
         bound = r.hget(store.META_KEY, "corpus_domain")
         if bound and bound != domain:
-            raise ValueError("Destination belongs to the other corpus domain")
+            raise ValueError("Destination belongs to a different corpus domain")
         if not bound and (r.hget(store.META_KEY, "generation") or
                           list(r.scan_iter(match=f"{store.INDEX_NAME}:doc:*", count=1000)) or
                           list(r.scan_iter(match=f"{store.INDEX_NAME}:note:*", count=1000))):

@@ -23,7 +23,8 @@ def main():
     parser.add_argument("--redis-url", required=True)
     parser.add_argument("--container", required=True)
     parser.add_argument("--output", type=Path, required=True, help="New bundle directory; also writes its .zip sibling")
-    parser.add_argument("--project", help="Shared fixed project for a work bundle")
+    parser.add_argument("--project", help="Optional fixed project; must match all documents and notes")
+    parser.add_argument("--include-notes", action="store_true", help="Explicitly include saved agent notes in the snapshot")
     parser.add_argument("--wsl-distro")
     args = parser.parse_args()
     output = args.output.resolve()
@@ -35,8 +36,8 @@ def main():
             stdin=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).strip()
     report = prepare(args.manifest, store.load_model())
     domain = report["domain"]
-    if domain == "work" and {x["project"] for x in report["records"]} != {args.project}:
-        parser.error("Work bundles require --project matching every selected document")
+    if args.project and {x["project"] for x in report["records"]} != {args.project}:
+        parser.error("--project must match every selected document")
     with redis.Redis.from_url(args.redis_url, decode_responses=True) as r:
         store.check_model(r)
         if r.hget(store.META_KEY, "corpus_domain") != domain:
@@ -64,8 +65,10 @@ def main():
         if seen != set(expected) or len(keys) != len(expected):
             raise ValueError("Stored topic coverage is incomplete")
         notes = list(r.scan_iter(match=namespace.notes + "*"))
-        if domain == "work" and notes:
-            raise ValueError("Work snapshot contains unexpected agent notes")
+        if notes and not args.include_notes:
+            raise ValueError("Snapshot contains agent notes; use --include-notes to include them explicitly")
+        if args.project and any(r.hget(key, "project") != args.project for key in notes):
+            raise ValueError("--project must match every saved note")
         allowed = {store.META_KEY, f"{store.INDEX_NAME}:curated", *keys, *notes}
         if set(r.scan_iter()) != allowed or set(r.execute_command("FT._LIST")) != {namespace.index}:
             raise ValueError("Instance contains additional keys or indexes; refusing a potentially mixed export")

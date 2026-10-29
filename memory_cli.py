@@ -3,7 +3,7 @@ which only has a bash tool). A thin client of the shared HTTP server: the embedd
 loaded there, so a call takes about a second instead of the 5-30 s a standalone process needs.
 
     memory search "why did the build move to clang?"   # project of the current directory
-    memory search -c personal -p ds4 "..."             # explicit context/project
+    memory search -c projects -p game "..."             # explicit context/project
     memory save "Title" <<'EOF'                        # note content comes from stdin
     ...
     EOF
@@ -52,7 +52,7 @@ def bounded(text: str, max_chars: int) -> str:
 
 
 def describe_project(project: str, resources: list[str]) -> str:
-    """A project with the topics of its documents, so an agent can map "what is DUC?" to the work
+    """A project with the topics of its documents, so an agent can map a component question to the appropriate
     context. A document named after its own project adds nothing and is left out."""
     topics = [PurePosixPath(r).stem for r in resources]
     topics = [t for t in topics if t.lower() != project.lower()]

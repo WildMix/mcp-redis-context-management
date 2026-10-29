@@ -18,9 +18,9 @@ class CuratedCorpusTests(unittest.TestCase):
     def write(self, text, **changes):
         source = self.root / "guide.md"
         source.write_text(text, encoding="utf-8")
-        doc = {"document_id": "work/example/guide", "project": "platform", "file": "guide.md",
+        doc = {"document_id": "reference/example/guide", "project": "platform", "file": "guide.md",
                "content_sha256": hashlib.sha256(source.read_bytes()).hexdigest(), **changes}
-        self.manifest.write_text(json.dumps({"schema": 1, "domain": "work", "corpus_root": ".",
+        self.manifest.write_text(json.dumps({"schema": 1, "domain": "reference", "corpus_root": ".",
                                              "documents": [doc]}), encoding="utf-8")
 
     def test_command_and_prerequisite_are_one_retrievable_unit(self):
@@ -31,7 +31,7 @@ class CuratedCorpusTests(unittest.TestCase):
         self.assertIn("local database", record["content"])
         self.assertIn("run server", record["content"])
         self.assertIn("test identity", record["content"])
-        self.assertEqual(record["topic_id"], "work/example/guide#run-locally")
+        self.assertEqual(record["topic_id"], "reference/example/guide#run-locally")
         self.assertEqual(record["source"], "guide.md")
         self.assertNotIn(str(self.root), record["embedding_text"])
 
@@ -66,14 +66,27 @@ class CuratedCorpusTests(unittest.TestCase):
         self.assertEqual(len(result["records"]), 1)
 
     def test_domain_mismatch_and_path_escape_are_rejected(self):
-        for changes in ({"document_id": "personal/example/guide"}, {"file": "../guide.md"}):
+        for changes in ({"document_id": "projects/example/guide"}, {"file": "../guide.md"}):
             with self.subTest(changes=changes):
                 self.write("# Example\n## Role\nA library.\n", **changes)
                 with self.assertRaisesRegex(ValueError, "Invalid or duplicate"):
                     prepare(self.manifest, TinyModel())
 
+    def test_arbitrary_domain_and_invalid_domain(self):
+        self.write("# Example\n## Role\nA library.\n")
+        manifest = json.loads(self.manifest.read_text())
+        manifest["domain"] = "library-v2"
+        manifest["documents"][0]["document_id"] = "library-v2/example"
+        self.manifest.write_text(json.dumps(manifest))
+        self.assertEqual(prepare(self.manifest, TinyModel())["domain"], "library-v2")
+        for domain in ("../escape", "", None):
+            manifest["domain"] = domain
+            self.manifest.write_text(json.dumps(manifest))
+            with self.subTest(domain=domain), self.assertRaises(ValueError):
+                prepare(self.manifest, TinyModel())
+
     def test_invalid_markdown_cannot_create_noise_chunks(self):
-        for text in ("# Example\nDomain: work\n## Role\nA library.",
+        for text in ("# Example\nDomain: reference\n## Role\nA library.",
                      "# Example\n## Role\n```sh\nrun",
                      "# Example\n### Nested\nA library.",
                      "# Example\n## Role\nA library.\n## Role\nAnother library.",

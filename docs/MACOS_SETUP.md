@@ -24,8 +24,8 @@ on Intel). Preserve other Docker settings when adding this array.
 Restore each export with the repository's restore script, giving it a distinct container name:
 
 ```sh
-.venv/bin/python scripts/restore_curated.py --bundle /path/to/work-export --name project-memory-work-redis --port 6380
-.venv/bin/python scripts/restore_curated.py --bundle /path/to/personal-export --name project-memory-personal-redis --port 6381
+.venv/bin/python scripts/restore_curated.py --bundle /path/to/reference-export --name project-memory-reference-redis --port 6380
+.venv/bin/python scripts/restore_curated.py --bundle /path/to/projects-export --name project-memory-projects-redis --port 6381
 ```
 
 The restore verifies checksums and refuses existing containers or volumes. It loads the snapshot
@@ -33,21 +33,22 @@ before enabling append-only persistence, then recreates the container and verifi
 Do not run the restore on every startup. Do not start either Compose stack over restored containers.
 
 Copy `memory_routes.example.json` to `memory_routes.local.json`, then combine both targets and
-set their routes to this Mac's directories. Give the work target its exported shared project ID.
-For automatic directory selection, personal routes need one project ID per checkout; use each ID
-from its manifest. Include this tool's checkout as a personal route for automatic setup-note routing. Routes may be
+set their routes to this Mac's directories. Give any fixed-project target its exported shared project ID.
+For automatic directory selection, targets without a fixed project need one project ID per checkout; use each ID
+from its manifest. Include this tool's checkout as a route for automatic setup-note routing. Routes may be
 prepared before a checkout exists. Directory selection requires an existing absolute `workdir`;
 explicit `context`/`project` selection needs no checkout or route.
 Linked worktrees inherit their main checkout's route. Without explicit context selection, unmapped
 directories fail without searching another project or database. Restart the MCP agent after editing routes.
 
-Keep the work target `read_only: true`, as in the exports. Personal targets may use
-`read_only: false` for explicit MCP saves. Work notes remain blocked even if a client tries to save.
+Set `read_only: true` or `false` independently on each target. Names and corpus labels do not
+determine permissions. Restore defaults to read-only; pass `--writable` to allow explicit MCP saves.
+Keep existing container names and volumes when changing routes; no database reimport is needed.
 
 Create the ignored `redis-containers.local.json`:
 
 ```json
-["project-memory-work-redis", "project-memory-personal-redis"]
+["project-memory-reference-redis", "project-memory-projects-redis"]
 ```
 
 Download and warm the same model used by the exports, then install automatic startup:
@@ -84,12 +85,12 @@ selectively. Restart existing client sessions after registration. These are the 
 [Claude Code user-scope settings](https://code.claude.com/docs/en/mcp).
 
 Agent instructions should require searching project memory before unfamiliar work. From any directory,
-call `list_memory_contexts()` and pass `context="work"`, or `context="personal"` with the desired
+call `list_memory_contexts()` and pass `context="reference"`, or `context="projects"` with the desired
 `project`. No `workdir` is needed. For automatic directory selection, pass the current absolute project
-directory as `workdir`. Record decisions in project documentation and save lasting personal notes
+directory as `workdir`. Record decisions in project documentation and save lasting notes in writable contexts
 explicitly when appropriate. Allow `mcp__project-memory__list_memory_contexts` in Claude's permissions
 alongside the search/save tools if those are explicitly allowed.
-For mixed work/personal questions, use the discovery tool's document names to map topics, then query
+For questions spanning contexts or projects, use the discovery tool's document names to map topics, then query
 each relevant scope separately with focused questions and combine the cited results. A multi-topic
 request is not a reason to force the user to choose only one context.
 

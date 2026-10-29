@@ -75,9 +75,9 @@ class RoutingTests(unittest.IsolatedAsyncioTestCase):
         self.roots(self.root, self.root / 'missing')
         with patch.object(server, 'search', return_value='selected') as search:
             result = await server.search_project_memory('topic', self.ctx, workdir='missing',
-                                                        context='personal', project='game')
+                                                        context='projects', project='game')
             self.assertEqual(result, 'selected')
-            search.assert_called_once_with('topic', '', 'personal', 'game')
+            search.assert_called_once_with('topic', '', 'projects', 'game')
         self.session.check_client_capability.assert_not_called()
 
     async def test_partial_selector_does_not_fall_back_to_directory(self):
@@ -142,10 +142,10 @@ class HttpIntegrationTests(unittest.TestCase):
             base = f'http://127.0.0.1:{port}'
             environment = dict(os.environ, MEMORY_INDEX=prefix, MEMORY_PROJECT='', HF_HUB_OFFLINE='1', MEMORY_ROUTES='')
             if explicit:
-                r.hset(prefix + ':meta', mapping={'corpus_domain': 'personal'})
+                r.hset(prefix + ':meta', mapping={'corpus_domain': 'projects'})
                 routes = root / 'routes.json'
                 routes.write_text(json.dumps({'schema': 1, 'targets': {
-                    'personal': {'domain': 'personal', 'redis_url': store.REDIS_URL, 'read_only': False}},
+                    'projects': {'domain': 'projects', 'redis_url': store.REDIS_URL, 'read_only': False}},
                     'routes': []}))
                 environment['MEMORY_ROUTES'] = str(routes)
             with (root / 'server.log').open('w+', encoding='utf-8') as log:
@@ -179,7 +179,7 @@ class HttpIntegrationTests(unittest.TestCase):
                             async with streamable_http_client(base + '/mcp') as (read, write, _):
                                 async with ClientSession(read, write, list_roots_callback=roots) as session:
                                     await session.initialize()
-                                    selection = {'context': 'personal', 'project': project.name} if explicit else {}
+                                    selection = {'context': 'projects', 'project': project.name} if explicit else {}
                                     saved = await session.call_tool('save_to_project_memory', {
                                         'title': project.name, 'content': f'Only {project.name} owns this decision.',
                                         **selection})
@@ -202,7 +202,7 @@ class HttpIntegrationTests(unittest.TestCase):
                                 for project in projects:
                                     result = await session.call_tool('search_project_memory', {
                                         'query': 'decision', 'workdir': str(project),
-                                        **({'context': 'personal', 'project': project.name} if explicit else {})})
+                                        **({'context': 'projects', 'project': project.name} if explicit else {})})
                                     self.assertFalse(result.isError)
                                     self.assertIn(f'Only {project.name}', result.content[0].text)
                                 if explicit:
@@ -213,10 +213,10 @@ class HttpIntegrationTests(unittest.TestCase):
                                     catalog = await session.call_tool('list_memory_contexts', {})
                                     self.assertFalse(catalog.isError)
                                     contexts = json.loads(catalog.content[0].text)['contexts']
-                                    self.assertEqual(contexts, [{'context': 'personal', 'domain': 'personal',
+                                    self.assertEqual(contexts, [{'context': 'projects', 'domain': 'projects',
                                         'read_only': False, 'project_required': True, 'projects': ['alpha', 'beta'],
                                         'resources': {'alpha': ['gameplay.md'], 'beta': []}}])
-                                    for selection, error in [({'context': 'personal'}, 'requires an explicit project'),
+                                    for selection, error in [({'context': 'projects'}, 'requires an explicit project'),
                                                              ({'context': 'unknown', 'project': 'alpha'}, 'Unknown'),
                                                              ({'project': 'alpha'}, 'requires context')]:
                                         result = await session.call_tool('search_project_memory', {'query': 'decision', **selection})

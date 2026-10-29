@@ -13,8 +13,10 @@ import time
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", type=Path, default=Path(__file__).resolve().parent)
-    parser.add_argument("--name", default="project-memory-work-copy")
+    parser.add_argument("--name", default="project-memory-copy")
     parser.add_argument("--port", type=int, default=6380)
+    parser.add_argument("--writable", action="store_true", help="Allow explicit MCP saves in the restored context (default: read-only)")
+    parser.add_argument("--context", help="Routing context name (default: bundle domain)")
     parser.add_argument("--wsl-distro")
     args = parser.parse_args()
     if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{2,80}", args.name) or not 1 <= args.port <= 65535:
@@ -86,11 +88,12 @@ def main():
     run("start", args.name)
     wait_ready()
     verify()
-    target = {"redis_url": f"redis://127.0.0.1:{args.port}/0", "domain": meta["domain"], "read_only": meta["domain"] == "work"}
-    config = {"schema": 1, "targets": {meta["domain"]: target}, "routes": []}
+    target = {"redis_url": f"redis://127.0.0.1:{args.port}/0", "domain": meta["domain"], "read_only": not args.writable}
+    context = args.context or meta["domain"]
+    config = {"schema": 1, "targets": {context: target}, "routes": []}
     if meta.get("project"):
         target["project"] = meta["project"]
-        config["default_target"] = meta["domain"]
+        config["default_target"] = context
     routes = root / (args.name + ".routes.json")
     routes.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"status": "restored-and-restarted", "container": args.name, "volume": volume,
