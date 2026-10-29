@@ -72,12 +72,15 @@ class RouterTests(unittest.TestCase):
                 server.save("Title", "Text", str(self.root / "game"), "test", context="reference")
             connect.assert_not_called()
 
-    def test_catalog_lists_stored_projects_without_routes(self):
+    def test_catalog_excludes_stale_tags_and_lists_stored_projects_without_routes(self):
         router = self.router()
         with patch.object(router, "connect") as connect, patch("memory_routing.index_exists", return_value=True):
             connect.return_value.hget.return_value = ""
-            connect.return_value.ft.return_value.tagvals.return_value = ["archived-project", "game"]
-            connect.return_value.ft.return_value.search.return_value = SimpleNamespace(docs=[], total=0)
+            connect.return_value.ft.return_value.tagvals.return_value = ["archived-project", "game", "retired-project"]
+            def metadata(query):
+                expression = query.get_args()[0]
+                return SimpleNamespace(docs=[], total=int(expression != "@kind:{doc}" and "retired" not in expression))
+            connect.return_value.ft.return_value.search.side_effect = metadata
             contexts = {item["context"]: item for item in router.contexts()}
         self.assertEqual(contexts["reference"]["projects"], ["platform"])
         self.assertTrue(contexts["reference"]["read_only"])

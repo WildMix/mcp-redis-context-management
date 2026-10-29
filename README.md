@@ -118,7 +118,7 @@ file). RedisInsight, for browsing the index, is at <http://localhost:8001>.
 inside the distro.
 
 ```powershell
-wsl -d Ubuntu --cd /mnt/c/path/to/mpc-redis-context-management -- docker compose up -d --wait
+wsl -d Ubuntu --cd /mnt/c/path/to/mcp-redis-context-management -- docker compose up -d --wait
 ```
 
 - **Reaching Redis from Windows.** Windows reaches `127.0.0.1:6379` through WSL's localhost
@@ -749,8 +749,10 @@ tracking, so stop writers/rebuilds first. To start over, first export a backup, 
 
 The database lives in Docker's persistent `redis-data` volume, mounted at `/data` inside
 `project-memory-redis`, not in this Git repository. With the default checkout name, the volume is
-`mpc-redis-context-management_redis-data`. With Docker Engine in Ubuntu WSL, its files live inside
-Ubuntu, normally at `/var/lib/docker/volumes/mpc-redis-context-management_redis-data/_data`.
+`mcp-redis-context-management_redis-data`. With Docker Engine in Ubuntu WSL, its files live inside
+Ubuntu, normally at `/var/lib/docker/volumes/mcp-redis-context-management_redis-data/_data`.
+Existing installations retain their original Docker volume names when a checkout is renamed.
+Use the volume reported by Docker rather than creating a new empty volume.
 Cloning or pushing this repository does not transfer the database.
 
 To check the actual volume and location on your machine:

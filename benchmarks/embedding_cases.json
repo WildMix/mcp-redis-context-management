@@ -3,7 +3,7 @@
   "intents": [
     {
       "id": "m01",
-      "project": "mpc-redis-context-management",
+      "project": "mcp-redis-context-management",
       "answer": "Set repository-local project-memory.id to distinguish repositories with the same directory name.",
       "patterns": [
         "project-memory\\.id",
@@ -16,7 +16,7 @@
     },
     {
       "id": "m02",
-      "project": "mpc-redis-context-management",
+      "project": "mcp-redis-context-management",
       "answer": "Shared HTTP calls must pass an absolute existing workdir, or supply exactly one valid MCP root.",
       "patterns": [
         "shared HTTP",
@@ -30,7 +30,7 @@
     },
     {
       "id": "m03",
-      "project": "mpc-redis-context-management",
+      "project": "mcp-redis-context-management",
       "answer": "Synchronization runs on client startup, periodically while active, and once after the last client closes.",
       "patterns": [
         "last client|final import|final sync|final sweep",
@@ -43,7 +43,7 @@
     },
     {
       "id": "m04",
-      "project": "mpc-redis-context-management",
+      "project": "mcp-redis-context-management",
       "answer": "Incremental imports skip unchanged files, replace changed chunks, and remove chunks for deleted files.",
       "patterns": [
         "unchanged",
@@ -57,7 +57,7 @@
     },
     {
       "id": "m05",
-      "project": "mpc-redis-context-management",
+      "project": "mcp-redis-context-management",
       "answer": "Changing EMBEDDING_MODEL requires rebuilding/re-embedding the stored index.",
       "patterns": [
         "EMBEDDING_MODEL",
@@ -70,7 +70,7 @@
     },
     {
       "id": "m06",
-      "project": "mpc-redis-context-management",
+      "project": "mcp-redis-context-management",
       "answer": "A revision check aborts a rebuild if writes occur during staging; pause writers and retry.",
       "patterns": [
         "revision|writes|writers",
@@ -84,7 +84,7 @@
     },
     {
       "id": "m07",
-      "project": "mpc-redis-context-management",
+      "project": "mcp-redis-context-management",
       "answer": "Disable AOF for the initial RDB restore because existing AOF data takes precedence, then re-enable it.",
       "patterns": [
         "AOF",
@@ -98,7 +98,7 @@
     },
     {
       "id": "m08",
-      "project": "mpc-redis-context-management",
+      "project": "mcp-redis-context-management",
       "answer": "A pending stdin pipe read blocks scipy/Fortran inspection during model import; use a private transport pipe and PeekNamedPipe, and DEVNULL for subprocesses.",
       "patterns": [
         "stdin",
@@ -111,7 +111,7 @@
     },
     {
       "id": "m09",
-      "project": "mpc-redis-context-management",
+      "project": "mcp-redis-context-management",
       "answer": "updated_at is the time content was written to Redis; source_modified_at is the imported file modification time. Rebuilds preserve these.",
       "patterns": [
         "updated_at",
@@ -125,7 +125,7 @@
     },
     {
       "id": "m10",
-      "project": "mpc-redis-context-management",
+      "project": "mcp-redis-context-management",
       "answer": "Search starts with thirty candidates, folds identical content and note chunks, and expands until it has three distinct results or exhausts candidates.",
       "patterns": [
         "30|thirty",

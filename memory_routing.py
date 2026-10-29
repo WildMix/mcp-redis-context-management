@@ -124,7 +124,11 @@ class Router:
             if target.project:
                 projects = {target.project}
             elif has_index:
-                projects.update(client.ft(namespace.index).tagvals("project"))
+                # TAGVALS can retain old values after every matching record is renamed/deleted.
+                # Count matches without fetching document bodies, and keep explicit routes above.
+                projects.update(project for project in client.ft(namespace.index).tagvals("project")
+                                if client.ft(namespace.index).search(
+                                    Query(f"@project:{{{tag(project)}}}").paging(0, 0)).total)
             sources = {}
             if has_index:
                 # Fetch only routing metadata, never document bodies or embeddings. Multiple chunks
