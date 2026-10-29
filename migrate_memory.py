@@ -33,6 +33,7 @@ import uuid
 from pathlib import Path
 
 import redis
+import memory_history
 from redis.commands.search.query import Query
 
 from memory_store import (FILES_KEY, INDEX_NAME, META_KEY, MODEL_NAME, CHUNKER_VERSION, Chunk, Namespace,
@@ -152,16 +153,22 @@ def import_dirs(r, roots: list[Path], project: str, *, literal_roots: tuple[Path
                     "embedding": vector.tobytes(),
                 }))
             def replace(pipe):
+                memory_history.queue_archives(pipe, archives)
                 drop_chunks(r, pipe, namespace, path)
                 for key, fields in records:
                     pipe.hset(key, mapping=fields)
                 pipe.hset(FILES_KEY, str(path), digest)
+            previous_keys = sorted(r.scan_iter(match=f"{namespace.docs}{fid}:*"))
+            archives = memory_history.document_revisions(r, namespace, records, previous_keys)
             mutate(r, namespace, replace)
             total_chunks += len(chunks)
             print(f"  imported {path} ({len(chunks)} chunks)")
 
     for src in removed:
+        previous_keys = sorted(r.scan_iter(match=f"{namespace.docs}{file_id(src)}:*"))
+        archives = memory_history.document_revisions(r, namespace, [], previous_keys)
         def remove(pipe):
+            memory_history.queue_archives(pipe, archives)
             drop_chunks(r, pipe, namespace, src)
             pipe.hdel(FILES_KEY, src)
         mutate(r, namespace, remove)
@@ -243,7 +250,8 @@ def rebuild(r) -> None:
 def rebuilt_records(r, old: Namespace, model) -> list[tuple[str, dict]]:
     """Re-chunk notes and stored doc paragraphs, preserving their provenance without source files."""
     fields = ["kind", "source", "heading", "content", "project", "note_id", "parts", "join_mode",
-              "created", "updated_at", "source_modified_at", "agent", "branch", "worktree", "start_line", "end_line"]
+              "created", "updated_at", "source_modified_at", "agent", "branch", "worktree", "start_line", "end_line",
+              "memory_id", "revision", "state", "conflicts", "content_digest", "part", "topic_id", "document_id", "domain"]
     notes: dict[str, list[tuple[int, dict]]] = {}
     docs: dict[str, list[tuple[str, dict]]] = {}
     for prefix in (old.notes, old.docs):
@@ -267,16 +275,23 @@ def rebuilt_records(r, old: Namespace, model) -> list[tuple[str, dict]]:
         chunks = fit_chunks(model, "note", "", [Chunk(record["heading"], content, 1, 1)])
         for n, chunk in enumerate(chunks):
             out.append((f"note:{note_id}:{n}", {**record, "content": chunk.text,
-                                              "parts": len(chunks), "join_mode": "exact"}))
+                                              "parts": len(chunks), "part": n, "join_mode": "exact"}))
     for source, pieces in docs.items():
         n = 0
-        for _, record in sorted(pieces):
+        parts = {}
+        for _, record in sorted(pieces, key=lambda item: (item[1].get("memory_id", ""),
+                                  int(item[1].get("revision", 1)), int(item[1].get("part", 0)), item[0])):
             original = Chunk(record["heading"], record["content"], int(record["start_line"]), int(record["end_line"]))
             for chunk in fit_chunks(model, "doc", source, [original]):
                 text = embedding_text("doc", source, chunk.heading, chunk.text)
-                out.append((f"doc:{file_id(source)}:{n:04d}", {**record, "content": chunk.text,
+                prefix = "doc:history:" if record.get("state") in ("historical", "retired") else "doc:"
+                group = (record.get("memory_id", ""), record.get("revision", "1"))
+                part = parts.get(group, 0)
+                out.append((f"{prefix}{file_id(source)}:{n:04d}", {**record, "content": chunk.text,
+                            "part": part,
                             "content_sha": hashlib.sha1(text.encode("utf-8")).hexdigest()}))
                 n += 1
+                parts[group] = part + 1
     return out
 
 

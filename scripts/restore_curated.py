@@ -61,7 +61,7 @@ def main():
         if cli("HGET", meta["index"] + ":meta", "model") != meta["model"]:
             raise RuntimeError("Restored model does not match the bundle")
         info = cli("FT.INFO", meta["index"]).splitlines()
-        if int(info[info.index("num_docs") + 1]) != meta["chunks"] + meta["note_chunks"]:
+        if int(info[info.index("num_docs") + 1]) != meta["chunks"] + meta["note_chunks"] + meta.get("history_chunks", 0):
             raise RuntimeError("Restored index count does not match the bundle")
     create("no")
     path = root / "dump.rdb"

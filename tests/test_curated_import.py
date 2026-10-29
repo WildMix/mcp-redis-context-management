@@ -189,7 +189,8 @@ class CuratedImportTests(unittest.TestCase):
                            "content_sha256": hashlib.sha256(file.read_bytes()).hexdigest()}]}), encoding="utf-8")
 
     def docs(self):
-        return {k: self.r.hget(k, "content") for k in self.r.scan_iter(match=store.DOC_PREFIX + "*")}
+        return {k: self.r.hget(k, "content") for k in self.r.scan_iter(match=store.DOC_PREFIX + "*")
+                if self.r.hget(k, "state") not in ("historical", "retired")}
 
     def publish(self):
         return import_curated.publish(self.r, self.manifest, self.model)

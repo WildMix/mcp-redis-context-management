@@ -1003,3 +1003,16 @@ These are all fine for commercial use:
 - **mcp, redis-py**: MIT.
 - **Redis Stack server**: RSALv2/SSPLv1. You may use it for your own work, but you may not offer
   it to others as a hosted database service.
+
+## Memory history
+
+Saves preserve earlier versions of accepted updates. Search groups versions of the
+same memory, labels historical matches, and includes their current replacement.
+The optional `get_memory_history` tool reads older revisions. Agents keep using the
+existing save/search interface; comparison runs locally in the shared server.
+
+Before offline startup, run `.venv/bin/python scripts/provision-models.py`. Existing
+installations should back up Redis, stop writers and initialize version metadata
+with `memory_history.py --redis-url <configured-url>`, then restart their MCP server.
+See [memory history](docs/MEMORY_HISTORY_PROPOSAL.md) for behavior, limitations and
+migration instructions.

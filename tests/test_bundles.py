@@ -60,7 +60,7 @@ class BundleTests(unittest.TestCase):
                     client.hget.side_effect = lambda key, field: label if field == "corpus_domain" else note_project
                     client.hgetall.return_value = {"documents": "[]", "keys": '["doc:1"]'}
                     client.hmget.return_value = ["topic", label, "platform", "guide.md", "Role", "Text"]
-                    client.scan_iter.side_effect = lambda **kwargs: iter(["note:1"] if kwargs else [store.META_KEY, f"{store.INDEX_NAME}:curated", "doc:1", "note:1"])
+                    client.scan_iter.side_effect = lambda **kwargs: iter(([] if kwargs.get("match", "").startswith("doc:history:") else ["note:1"]) if kwargs else [store.META_KEY, f"{store.INDEX_NAME}:curated", "doc:1", "note:1"])
                     client.execute_command.return_value = ["test-index"]
                     client.save.side_effect = RuntimeError("snapshot reached")
                     def docker(command, **kwargs):
@@ -70,7 +70,7 @@ class BundleTests(unittest.TestCase):
                             patch.object(export_curated, "prepare", return_value={"domain": label, "documents": [], "records": [{"project": "platform", "topic_id": "topic", "source": "guide.md", "heading": "Role", "content": "Text"}]}), \
                             patch.object(export_curated.store, "load_model"), \
                             patch.object(export_curated.store, "check_model"), \
-                            patch.object(export_curated.store, "namespace_of", return_value=SimpleNamespace(notes="note:", index="test-index")), \
+                            patch.object(export_curated.store, "namespace_of", return_value=SimpleNamespace(notes="note:", docs="doc:", index="test-index")), \
                             patch.object(export_curated.redis.Redis, "from_url", return_value=client), \
                             patch.object(export_curated.subprocess, "check_output", side_effect=docker):
                         with self.assertRaisesRegex((ValueError, RuntimeError), expected):

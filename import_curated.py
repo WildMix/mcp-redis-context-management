@@ -16,6 +16,7 @@ import redis
 
 from curated_corpus import prepare
 import memory_store as store
+import memory_history
 
 
 def publish(r, manifest: Path, model) -> dict:
@@ -54,7 +55,9 @@ def publish(r, manifest: Path, model) -> dict:
                           embedding=vector.tobytes())
             records.append((key, fields))
         keys = [key for key, _ in records]
+        archives = memory_history.document_revisions(r, namespace, records, old_keys)
         def replace(pipe):
+            memory_history.queue_archives(pipe, archives)
             if old_keys:
                 pipe.delete(*old_keys)
             for key, fields in records:
@@ -67,7 +70,8 @@ def publish(r, manifest: Path, model) -> dict:
     while True:
         info = r.ft(namespace.index).info()
         notes = sum(1 for _ in r.scan_iter(match=namespace.notes + "*"))
-        if not int(info.get("indexing", 0)) and int(info["num_docs"]) == len(keys) + notes:
+        history_chunks = sum(1 for _ in r.scan_iter(match=namespace.docs + "history:*"))
+        if not int(info.get("indexing", 0)) and int(info["num_docs"]) == len(keys) + notes + history_chunks:
             if int(info.get("hash_indexing_failures", 0)):
                 raise RuntimeError("Redis reported indexing failures")
             break

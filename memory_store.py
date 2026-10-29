@@ -148,6 +148,10 @@ def create_index(r: redis.Redis, dim: int, namespace: Namespace = Namespace()) -
             TagField("project"),
             TagField("kind"),  # note | doc
             TagField("source", separator="|"),
+            TagField("memory_id"),
+            NumericField("revision", sortable=True),
+            TagField("state"),
+            TagField("content_digest"),
             NumericField("created", sortable=True),
             VectorField("embedding", "HNSW", {"TYPE": "FLOAT32", "DIM": dim, "DISTANCE_METRIC": "COSINE"}),
         ],
@@ -167,6 +171,13 @@ def ensure_index(r, dim: int) -> Namespace:
         check_model(r)
         if not r.hget(META_KEY, "model") or int(r.hget(META_KEY, "dim") or 0) != dim:
             raise RuntimeError("Index metadata is missing or incompatible; run migrate_memory.py --rebuild.")
+        # Additive schema upgrade: existing text/vectors are preserved, including curated stores.
+        info = r.ft(namespace.index).info()
+        names = {entry[entry.index("attribute") + 1] for entry in info["attributes"]}
+        for name, definition in (("memory_id", ["TAG"]), ("revision", ["NUMERIC", "SORTABLE"]),
+                                 ("state", ["TAG"]), ("content_digest", ["TAG"])):
+            if name not in names:
+                r.execute_command("FT.ALTER", namespace.index, "SCHEMA", "ADD", name, *definition)
         return namespace
 
 

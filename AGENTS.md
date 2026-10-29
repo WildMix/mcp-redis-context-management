@@ -14,6 +14,9 @@ Use the shared `project-memory` MCP server:
   background synchronizer imports documentation and saved agent memories automatically. The macOS
   setup leaves synchronization disabled; see [docs/MACOS_SETUP.md](docs/MACOS_SETUP.md).
 - `save_to_project_memory` remains optional for lasting knowledge missing from those sources.
-  Search for duplicates before saving; no end-of-turn memory review or response is required.
+  The service checks duplicates and retains versions; agents do not manage history.
+  No end-of-turn memory review or response is required.
 
 See [README.md](README.md#using-it) for details.
+Version storage, local comparison, migration and deployment are described in
+[Memory history](docs/MEMORY_HISTORY_PROPOSAL.md).

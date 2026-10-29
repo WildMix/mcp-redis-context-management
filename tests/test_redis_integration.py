@@ -42,7 +42,8 @@ class RedisTests(unittest.TestCase):
 
     def documents(self):
         namespace = store.namespace_of(self.r)
-        return {key: self.r.hget(key, "content") for key in self.r.scan_iter(match=namespace.docs + "*")}
+        return {key: self.r.hget(key, "content") for key in self.r.scan_iter(match=namespace.docs + "*")
+                if self.r.hget(key, "state") not in ("historical", "retired")}
 
     def test_parallel_first_saves_both_succeed(self):
         barrier = threading.Barrier(2)
@@ -376,7 +377,7 @@ class RealModelTests(unittest.TestCase):
                         async with ClientSession(read, write) as session:
                             await session.initialize()
                             names = {tool.name for tool in (await session.list_tools()).tools}
-                            self.assertEqual(names, {"list_memory_contexts", "search_project_memory", "save_to_project_memory"})
+                            self.assertEqual(names, {"list_memory_contexts", "search_project_memory", "save_to_project_memory", "get_memory_history"})
                             catalog = await session.call_tool("list_memory_contexts", {})
                             self.assertFalse(catalog.isError)
                             self.assertEqual(json.loads(catalog.content[0].text)["contexts"], [])

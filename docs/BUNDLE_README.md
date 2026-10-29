@@ -48,6 +48,7 @@ upgrading; the generic example names do not rename existing installations.
 ```powershell
 python -m venv .venv
 .venv\Scripts\python -m pip install -r runtime/requirements.txt
+.venv\Scripts\python runtime/scripts/provision-models.py
 $env:MEMORY_ROUTES = (Resolve-Path project-memory-copy.routes.json).Path
 .venv\Scripts\python runtime/mcp_server.py --transport streamable-http --port 8765
 ```
@@ -86,7 +87,9 @@ Automatic updates and raw agent-history import are intentionally absent from thi
 To publish reviewed changes, update the selected files and their SHA-256 values in `manifest.json`,
 then run `runtime/import_curated.py manifest.json --redis-url redis://127.0.0.1:6380/0` with the bundle's
 Python environment. The validator requires one complete H2 topic per embedding chunk. Publishing
-replaces the selected corpus, including removed topics; keep the full selection in the manifest.
+replaces the current selection and retains old versions of changed/removed topics;
+keep the full selection in the manifest. Search labels historical matches and their
+current replacements. `get_memory_history` optionally inspects earlier versions.
 Keep the configured model/index unchanged unless performing a deliberate revalidated migration.
 
 Keep this ZIP and extracted corpus within the intended audience. The database snapshot contains the

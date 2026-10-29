@@ -144,3 +144,14 @@ The full suite with `MEMORY_RUN_INTEGRATION=1`, `MEMORY_TEST_REAL_MODEL=1` and t
 102 tests: 98 passed, with four Windows-only tests skipped. This includes disposable Redis tests,
 real HTTP clients, document-resource discovery, context selection without checkouts, model reuse and project isolation. Launcher
 tests cover unavailable Docker, container startup failure, unavailable Redis and paths containing spaces.
+
+## Enable memory history on an existing installation
+
+Provision the additional local comparison model with
+`.venv/bin/python scripts/provision-models.py` before offline startup. Keep the
+existing embedding model, Redis containers, volumes and routes. Back up each Redis
+instance and stop the MCP LaunchAgent while running `memory_history.py --redis-url
+<configured-url>` for each destination. Then restart `local.project-memory.mcp`.
+The migration preserves corpus text and embeddings; `/health` reports
+`memory_history: 1` and the loaded comparison model. See
+[memory history](MEMORY_HISTORY_PROPOSAL.md) for the complete procedure and limits.

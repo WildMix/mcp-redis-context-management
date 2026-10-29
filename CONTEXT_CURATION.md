@@ -72,7 +72,7 @@ do not start it when intending to use the isolated setup.
 
 The importer revalidates the manifest, binds the destination to its domain, embeds selected topics
 and atomically replaces the complete curated selection and registry. Unchanged publications skip
-embedding. Deleted documents/topics disappear; moving the directory does not create duplicates.
+embedding. Replaced/deleted topics remain as labeled historical records; moving the directory does not create duplicates.
 Agent notes are preserved. The operation is a complete corpus publication, not a partial patch:
 retain every desired document in the manifest. Avoid concurrent publishers.
 
@@ -153,7 +153,7 @@ python scripts/export_curated.py reference-manifest.json --redis-url redis://127
 
 Add `--wsl-distro Ubuntu` if Docker is inside WSL. Output is a new directory plus its ZIP. Export
 checks that Redis URL and container identify the same server, only database 0 has data, the full
-instance contains only the allowed corpus records, and stored topics match the selected Markdown. Saved agent notes require explicit `--include-notes`;
+instance contains only the allowed corpus records, and current stored topics match the selected Markdown. Saved agent notes and historical documents require explicit `--include-notes`;
 `--project` optionally restricts the bundle to one project and must match every document and note.
 The bundle includes the RDB, selected sources, portable manifest, runtime, checksums and restore/use
 instructions. Model weights, Docker images and Python dependencies are downloaded on first setup.

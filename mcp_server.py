@@ -19,10 +19,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import secrets
 import sys
 import threading
 import time
+import memory_history
+import memory_relations
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -168,8 +169,9 @@ mcp = FastMCP(
                  "project's architecture, design, past sessions, decisions or an implementation that is not "
                  "visible in the files you have open, before answering, planning or editing. Do not guess and do "
                  "not say you lack context: search first (if the tool is deferred, load it by name). Save with "
-                 "save_to_project_memory only new, lasting knowledge about this project (decisions and their "
-                 "reasons, constraints, gotchas) that the code, commits and docs don't already show.",
+                 "save_to_project_memory lasting knowledge about this project (decisions and their "
+                 "reasons, constraints, gotchas). The service checks duplicates and retains history. "
+                 "Search labels historical versions and conflicts; get_memory_history is optional.",
 )
 
 
@@ -178,7 +180,9 @@ async def health(request):
     """Process/model readiness only; normal tool calls also check Redis availability."""
     ready = _model is not None
     return JSONResponse({"status": "ready" if ready else "loading", "model_loaded": ready,
-                         "pid": os.getpid()}, status_code=200 if ready else 503)
+                         "pid": os.getpid(), "memory_history": 1,
+                         "relation_model": memory_relations.MODEL if memory_relations.enabled() else "off"},
+                        status_code=200 if ready else 503)
 
 
 # --- Search ------------------------------------------------------------------------------------
@@ -194,6 +198,7 @@ def search(query: str, directory: str, context: str = "", project: str = "") -> 
     project, r = destination(directory, context=context, project=project)
     for _ in range(3):
         namespace = namespace_of(r)
+        revision = r.hget(memory_history.store.META_KEY, "revision")
         try:
             if not index_exists(r, namespace.index):
                 result = "The project memory is empty: nothing has been saved or imported yet."
@@ -204,9 +209,9 @@ def search(query: str, directory: str, context: str = "", project: str = "") -> 
             if namespace_of(r) != namespace:
                 continue
             raise
-        if namespace_of(r) == namespace:
+        if namespace_of(r) == namespace and r.hget(memory_history.store.META_KEY, "revision") == revision:
             return result
-    raise RuntimeError("The memory was rebuilt repeatedly during this search; retry it.")
+    raise RuntimeError("The memory changed repeatedly during this search; retry it.")
 
 
 def _search(query: str, project: str, r, namespace: Namespace) -> str:
@@ -217,16 +222,18 @@ def _search(query: str, project: str, r, namespace: Namespace) -> str:
         knn = (Query(f"(@project:{{{tag(project)}}})=>[KNN {candidates} @embedding $vector AS distance]")
                .sort_by("distance")
                .return_fields("kind", "content", "heading", "source", "start_line", "end_line", "content_sha",
-                              "note_id", "parts", "join_mode", "created", "updated_at", "source_modified_at", "agent", "branch", "worktree", "distance")
+                              "note_id", "parts", "join_mode", "created", "updated_at", "source_modified_at", "agent", "branch", "worktree", "memory_id", "revision", "state", "conflicts", "topic_id", "project", "distance")
                .paging(0, candidates)
                .dialect(2))
         docs = r.ft(namespace.index).search(knn, query_params={"vector": vector.tobytes()}).docs
         groups: dict[str, list] = {}
         for doc in docs:
-            key = _field(doc, "note_id") or _field(doc, "content_sha") or doc.id
+            key = _field(doc, "memory_id") or _field(doc, "note_id") or _field(doc, "content_sha") or doc.id
             if key in groups or len(groups) < TOP_K:
                 groups.setdefault(key, []).append(doc)
         if len(groups) >= TOP_K or len(docs) < candidates:
+            break
+        if candidates >= 960:
             break
         candidates *= 2
     if not groups:
@@ -235,14 +242,18 @@ def _search(query: str, project: str, r, namespace: Namespace) -> str:
     parts = []
     for i, (best, *copies) in enumerate(groups.values(), 1):
         similarity = f"similarity {1 - float(best.distance):.2f}"
+        version = memory_history.describe(r, namespace, project, best)
         if _field(best, "kind") == "note":
-            parts.append(f"[{i}] {_describe_note(best)}  {similarity}\n{_note_text(r, best, namespace)}")
+            parts.append(f"[{i}] {_describe_note(best)}  {similarity}\n{version}\n{_note_text(r, best, namespace)}")
             continue
         lines = [f"[{i}] doc {best.source}:{best.start_line}-{best.end_line}  {similarity}"]
+        lines.append(version)
         if _field(best, "updated_at"):
             lines.append(f"updated in Redis: {best.updated_at}; source modified: {_field(best, 'source_modified_at') or 'unknown'}")
         if best.heading:
             lines.append(f"section: {best.heading}")
+        copies = [c for c in copies if _field(c, "revision") == _field(best, "revision")
+                  and _field(c, "content_sha") == _field(best, "content_sha")]
         if copies:
             lines.append("same text in: " + ", ".join(f"{c.source}:{c.start_line}-{c.end_line}" for c in copies))
         parts.append("\n".join(lines) + "\n\n" + best.content)
@@ -300,32 +311,24 @@ def save(title: str, content: str, directory: str, agent: str, context: str = ""
         pieces = note_chunks(content, model, title)
         vectors = encode(model, [embedding_text("note", "", title, piece) for piece in pieces])
     now = time.time()
-    note_id = time.strftime("%Y%m%d-%H%M%S", time.localtime(now)) + "-" + secrets.token_hex(8)
     worktree = git(directory, "rev-parse", "--show-toplevel") if directory else ""
     branch = git(directory, "branch", "--show-current") if directory else ""
-    records = []
-    for n, (piece, vector) in enumerate(zip(pieces, vectors)):
-        records.append((f"{namespace.notes}{note_id}:{n}", {
-            "kind": "note",
-            "project": project,
-            "note_id": note_id,
-            "parts": len(pieces),
-            "join_mode": "exact",
-            "heading": title,
-            "content": piece,
-            "source": f"note {note_id}",
+    return memory_history.commit_note(r, namespace, title, content, project, pieces, vectors, {
             "created": int(now),
             "updated_at": utc_timestamp(now),
             "agent": agent,
             "branch": branch,
             "worktree": str(Path(worktree)) if worktree else directory,
-            "embedding": vector.tobytes(),
-        }))
-    def queue(pipe):
-        for key, fields in records:
-            pipe.hset(key, mapping=fields)
-    mutate(r, namespace, queue)
-    return f'Saved note {note_id} to the memory of project "{project}".'
+        })
+
+
+def history(memory_id: str, directory: str, context: str = "", project: str = "",
+            before_revision: int = 0, limit: int = 5) -> str:
+    project, r = destination(directory, context=context, project=project)
+    namespace = namespace_of(r)
+    if not index_exists(r, namespace.index):
+        return "The project memory is empty."
+    return memory_history.history(r, namespace, project, memory_id, before_revision, limit)
 
 
 # --- Tools -------------------------------------------------------------------------------------
@@ -402,9 +405,10 @@ async def search_project_memory(query: str, ctx: Context, workdir: str = "",
 
     Ask in natural language ("how is authentication wired?", "why did the build move to clang?"). If a
     search misses, rephrase it (other words, the feature's or file's name) before concluding that nothing
-    is recorded. Returns the 3 most similar entries and where each comes from: for a doc, open the file at
+    is recorded. Returns the 3 most similar memories, grouping their versions, and where each comes from: for a doc, open the file at
     the given lines for the surrounding context; curated sources are portable paths relative to
-    the corpus bundle. A note is history, so check it against the current code.
+    the corpus bundle. Historical matches identify their current replacement. Use get_memory_history
+    optionally to inspect older versions. Check retrieved statements against current evidence.
 
     Args:
         query: a focused question about this context/project; split mixed-topic requests into separate calls
@@ -425,11 +429,13 @@ async def save_to_project_memory(title: str, content: str, ctx: Context, workdir
     Save only knowledge that is all of:
     - about this project itself (its code, design, architecture, assets, build or workflow), not about
       other repositories, your tools, the agent setup or this memory system;
-    - new: not already in the memory, and not plain from the code, a diff, a commit message or the docs;
     - lasting: a decision and its reasons, a rejected alternative, a constraint, a gotcha, a non-obvious
       cause, a known limitation or unfinished piece. A log of edits or of this session is not.
     When in doubt, don't save. Write the note to stand on its own for a reader who has not seen this
     conversation, and leave out secrets.
+    The service checks duplicates, preserves earlier versions of accepted updates, and marks
+    unresolved contradictions. You do not need to search for duplicates or manage versions.
+    Include factual scope, dates and source links when known; distinguish proposals from decisions.
     A read-only corpus rejects saves; propose an edit to its curated Markdown instead.
 
     Args:
@@ -442,6 +448,19 @@ async def save_to_project_memory(title: str, content: str, ctx: Context, workdir
     directory = "" if context or project else await _directory(ctx, workdir)
     client = ctx.session.client_params.clientInfo if ctx.session.client_params else None
     return await anyio.to_thread.run_sync(save, title, content, directory, client.name if client else "", context, project)
+
+
+@mcp.tool()
+async def get_memory_history(memory_id: str, ctx: Context, workdir: str = "", context: str = "",
+                             project: str = "", before_revision: int = 0, limit: int = 5) -> str:
+    """Optionally inspect previous versions using a memory ID returned by search_project_memory.
+
+    Select the same context/project as the search. No snapshot or Redis knowledge is needed.
+    Returns at most limit revisions (1-10, default 5), newest first. Pass before_revision
+    from the returned pagination hint for older versions. Historical facts may be obsolete.
+    """
+    directory = "" if context or project else await _directory(ctx, workdir)
+    return await anyio.to_thread.run_sync(history, memory_id, directory, context, project, before_revision, limit)
 
 
 def main() -> None:
@@ -473,6 +492,7 @@ def main() -> None:
             started = time.monotonic()
             with _inference_lock:
                 encode(embedding_model(), ["Project memory startup"])
+            memory_relations.warm()
             if _router:
                 for target in _router.targets.values():
                     _router.connect(target)

@@ -65,11 +65,16 @@ def main():
         if seen != set(expected) or len(keys) != len(expected):
             raise ValueError("Stored topic coverage is incomplete")
         notes = list(r.scan_iter(match=namespace.notes + "*"))
+        history = list(r.scan_iter(match=namespace.docs + "history:*"))
         if notes and not args.include_notes:
             raise ValueError("Snapshot contains agent notes; use --include-notes to include them explicitly")
         if args.project and any(r.hget(key, "project") != args.project for key in notes):
             raise ValueError("--project must match every saved note")
-        allowed = {store.META_KEY, f"{store.INDEX_NAME}:curated", *keys, *notes}
+        if history and not args.include_notes:
+            raise ValueError("Snapshot contains historical documents; use --include-notes to include history explicitly")
+        if args.project and any(r.hget(key, "project") != args.project for key in history):
+            raise ValueError("--project must match every historical document")
+        allowed = {store.META_KEY, f"{store.INDEX_NAME}:curated", *keys, *notes, *history}
         if set(r.scan_iter()) != allowed or set(r.execute_command("FT._LIST")) != {namespace.index}:
             raise ValueError("Instance contains additional keys or indexes; refusing a potentially mixed export")
         revision = r.hget(store.META_KEY, "revision")
@@ -87,6 +92,7 @@ def main():
         metadata = {"schema": 1, "domain": domain, "project": args.project,
                     "model": store.MODEL_NAME, "index": store.INDEX_NAME, "image": digests[0],
                     "documents": len(report["documents"]), "chunks": len(keys), "note_chunks": len(notes),
+                    "history_chunks": len(history),
                     "dbsize": r.dbsize(), "exported_at": store.utc_timestamp(),
                     "snapshot_sha256": hashlib.sha256(destination.read_bytes()).hexdigest()}
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
@@ -105,8 +111,10 @@ def main():
     runtime = output / "runtime"
     runtime.mkdir()
     for name in ("mcp_server.py", "memory_store.py", "memory_routing.py", "curated_corpus.py",
-                 "import_curated.py", "requirements.txt"):
+                 "import_curated.py", "memory_history.py", "memory_relations.py", "requirements.txt"):
         shutil.copyfile(ROOT / name, runtime / name)
+    (runtime / "scripts").mkdir()
+    shutil.copyfile(ROOT / "scripts/provision-models.py", runtime / "scripts/provision-models.py")
     shutil.copyfile(ROOT / "scripts" / "restore_curated.py", output / "restore.py")
     shutil.copyfile(ROOT / "docs" / "BUNDLE_README.md", output / "README.md")
     checksums = {p.relative_to(output).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()

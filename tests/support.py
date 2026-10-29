@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import numpy as np
 
+import memory_relations
 import memory_store as store
 import mcp_server as server
 import migrate_memory as migrate
@@ -34,6 +35,7 @@ def isolated_store(r, model=None):
     with contextlib.ExitStack() as stack:
         for module in (store, server, migrate):
             stack.enter_context(patch.multiple(module, **{k: v for k, v in values.items() if hasattr(module, k)}))
+        stack.enter_context(patch.object(memory_relations, "compare", return_value="uncertain"))
         stack.enter_context(patch.object(server, "connect", return_value=r))
         stack.enter_context(patch.object(server, "embedding_model", return_value=model))
         stack.enter_context(patch.object(migrate, "load_model", return_value=model))
