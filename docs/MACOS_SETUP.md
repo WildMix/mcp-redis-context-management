@@ -147,13 +147,17 @@ tests cover unavailable Docker, container startup failure, unavailable Redis and
 
 ## Enable memory history on an existing installation
 
-Provision the additional local comparison model with
-`.venv/bin/python scripts/provision-models.py` before offline startup. Keep the
+Cache the local embedding model with
+`.venv/bin/python scripts/provision-models.py` before offline startup. Relationships
+are declared by agents; there is no additional comparison model. Keep the
 existing embedding model, Redis containers, volumes and routes. Back up each Redis
 instance and stop the MCP LaunchAgent while running `memory_history.py --redis-url
 <configured-url>` for each destination. Then restart `local.project-memory.mcp`.
 The migration preserves corpus text and embeddings; `/health` reports
-`memory_history: 1` and the loaded comparison model. See
+`memory_history: 1`, `memory_relationships: "explicit"` and `relation_model: "off"`.
+If version metadata is already initialized, no Redis migration is required for
+explicit relationships: restart the server and reconnect clients for the new save
+arguments. See
 [memory history](MEMORY_HISTORY_PROPOSAL.md) for the complete procedure and limits.
 
 ## External MCP context sources

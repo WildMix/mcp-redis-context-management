@@ -1011,14 +1011,23 @@ These are all fine for commercial use:
 
 Saves preserve earlier versions of accepted updates. Search groups versions of the
 same memory, labels historical matches, and includes their current replacement.
-The optional `get_memory_history` tool reads older revisions. Agents keep using the
-existing save/search interface; comparison runs locally in the shared server.
+Agents choose relationships, including to notes saved by other sessions. Read the
+complete current note with `get_memory_history(memory_id, limit=1)`, then save with
+`relationship="supersedes"` or `"contradicts"`, `related_memory_id`, and the
+`expected_revision` read. Supersession preserves the memory ID and archives the old
+text; contradiction keeps both current and links them. Stale revisions are rejected
+for reassessment. A plain save is independent except for exact duplicate detection;
+there is no automatic semantic classifier. PR status changes alone do not merit saves.
+
+The CLI exposes `memory history ID` and the corresponding `memory save
+--relationship ... --related-memory-id ... --expected-revision ...` options.
 
 Before offline startup, run `.venv/bin/python scripts/provision-models.py`. Existing
-installations should back up Redis, stop writers and initialize version metadata
+installations without version metadata should back up Redis, stop writers and initialize it
 with `memory_history.py --redis-url <configured-url>`, then restart their MCP server.
 See [memory history](docs/MEMORY_HISTORY_PROPOSAL.md) for behavior, limitations and
-migration instructions.
+migration instructions, including isolated real-agent workflow tests. Already
+versioned installations only need a server restart/client reconnection for the new API.
 
 ## External context sources
 

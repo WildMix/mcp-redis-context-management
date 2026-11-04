@@ -19,12 +19,12 @@ from redis.commands.search.query import Query
 import redis
 
 import memory_store as store
-import memory_relations
 
 FIELDS = ("kind", "project", "content", "heading", "source", "start_line", "end_line",
           "content_sha", "note_id", "parts", "join_mode", "created", "updated_at",
           "source_modified_at", "agent", "branch", "worktree", "topic_id", "document_id",
-          "domain", "memory_id", "revision", "state", "conflicts", "content_digest", "part")
+          "domain", "memory_id", "revision", "state", "conflicts", "content_digest", "part",
+          "relationship", "related_memory_id", "related_revision")
 
 
 def field(doc, name, default=""):
@@ -93,38 +93,63 @@ def note_keys(namespace, doc):
     return [f"{namespace.notes}{doc.note_id}:{i}" for i in range(int(field(doc, "parts", "1")))]
 
 
-def select_relation(r, namespace, project, title, content, vectors):
-    """Called inside a WATCH transaction; the caller retries if any writer intervenes."""
+def validate_relationship(relationship, related_memory_id, expected_revision):
+    if relationship not in ("", "supersedes", "contradicts"):
+        raise ValueError("relationship must be supersedes or contradicts, or omitted for an independent note")
+    if type(expected_revision) is not int:
+        raise ValueError("expected_revision must be an integer")
+    if not relationship:
+        if related_memory_id or expected_revision:
+            raise ValueError("related_memory_id and expected_revision require a relationship")
+    elif not re.fullmatch(r"[nd]-[A-Za-z0-9._-]{1,128}", related_memory_id) or expected_revision < 1:
+        raise ValueError("A relationship requires related_memory_id and a positive expected_revision from the note you read")
+
+
+def select_relation(r, namespace, project, content, relationship, related_memory_id, expected_revision):
+    """Validate explicit intent inside WATCH; similarity never chooses a relationship."""
+    target = None
+    if relationship:
+        target = current(r, namespace, project, related_memory_id)
+        if not target:
+            raise ValueError("No current target memory in this context/project; search and read it before saving")
+        if relationship == "supersedes" and target.kind != "note":
+            raise ValueError("Agent notes cannot supersede curated documents; edit their source or record a contradiction")
+        # A retry after a lost acknowledgement must not create another revision.
+        if (relationship == "supersedes" and int(target.revision) == expected_revision + 1
+                and field(target, "relationship") == relationship
+                and field(target, "related_revision") == str(expected_revision)
+                and field(target, "content_digest") == digest(content)):
+            return "duplicate", target, []
+        if int(target.revision) != expected_revision:
+            raise ValueError(f"Stale memory {related_memory_id}: expected revision {expected_revision}, "
+                             f"current revision is {target.revision}. Read and reassess before saving.\n"
+                             f"{target.heading}\n{bounded_text(text(r, namespace, target))}")
+        if relationship == "supersedes":
+            # Scope the duplicate check to the explicit target, never another memory.
+            if text(r, namespace, target).strip() == content.strip():
+                return "duplicate", target, []
+            return "update", target, []
+        if text(r, namespace, target).strip() == content.strip():
+            raise ValueError("A memory cannot contradict identical content; no relationship was saved")
     exact = records(r, namespace, f"@project:{{{store.tag(project)}}} @state:{{current}} "
                     f"@content_digest:{{{digest(content)}}}", limit=1)
     if exact:
-        return "duplicate", exact[0], []
-    candidates = {}
-    # A bounded pool per chunk lets long notes find relevant memories too.
-    for vector in vectors[:8]:
-        q = (Query(f"(@project:{{{store.tag(project)}}} -@state:{{historical|retired}})"
-                   "=>[KNN 30 @embedding $vector AS distance]")
-             .return_fields(*FIELDS, "distance").sort_by("distance").paging(0, 30).dialect(2))
-        for doc in r.ft(namespace.index).search(q, query_params={"vector": vector.tobytes()}).docs:
-            if 1 - float(doc.distance) >= .55:
-                key = identity(doc)
-                if key not in candidates or float(doc.distance) < float(candidates[key].distance):
-                    candidates[key] = doc
-    replacements, conflicts = [], []
-    for doc in sorted(candidates.values(), key=lambda d: float(d.distance))[:8]:
-        old = text(r, namespace, doc)
-        if old.strip() == content.strip():
-            return "duplicate", doc, []
-        relation = memory_relations.compare(old, content)
-        # Keep semantic equivalents as revisions too: only exact text is discarded.
-        # A false-positive equivalence must never irreversibly lose the original.
-        if relation in ("updates", "extends", "equivalent") and field(doc, "kind") == "note":
-            replacements.append(doc)
-        elif relation in ("contradicts", "updates"):
-            conflicts.append(doc)
-    if len(replacements) == 1 and not conflicts:
-        return "update", replacements[0], []
-    return "new", None, [*conflicts, *replacements]
+        existing = exact[0]
+        if relationship and related_memory_id not in json.loads(field(existing, "conflicts", "[]")):
+            raise ValueError(f"This content already exists as {identity(existing)} without the requested relationship. "
+                             "No changes made; read both memories and reassess the note and its evidence.")
+        return "duplicate", existing, []
+    return "new", None, [target] if target else []
+
+
+def revision_keys(r, namespace, doc):
+    if doc.kind == "note":
+        return note_keys(namespace, doc)
+    chunks = records(r, namespace, scope(doc.project, doc.memory_id) +
+                     f" @revision:[{doc.revision} {doc.revision}]", limit=1001)
+    if len(chunks) > 1000:
+        raise ValueError("Target document has too many chunks to link atomically")
+    return [c.id for c in chunks]
 
 
 def document_revisions(r, namespace, incoming, old_keys):
@@ -172,20 +197,24 @@ def queue_archives(pipe, archives):
         pipe.hset(key, mapping=metadata)
 
 
-def commit_note(r, namespace, title, content, project, chunks, vectors, metadata):
-    """Atomically reconcile + append. WATCH spans candidate reads and model inference."""
+def commit_note(r, namespace, title, content, project, chunks, vectors, metadata,
+                relationship="", related_memory_id="", expected_revision=0):
+    """Atomically apply an agent-declared relationship, including cross-session saves."""
+    validate_relationship(relationship, related_memory_id, expected_revision)
     for _ in range(8):
         with r.pipeline(transaction=True) as pipe:
             try:
                 pipe.watch(store.META_KEY)
                 if store.namespace_of(pipe) != namespace:
                     raise RuntimeError("Memory rebuilt during save; retry")
-                operation, old, conflicts = select_relation(r, namespace, project, title, content, vectors)
+                operation, old, conflicts = select_relation(r, namespace, project, content,
+                                                            relationship, related_memory_id, expected_revision)
                 if operation == "duplicate":
                     # Even a no-op must check the watched revision before returning success.
                     pipe.multi()
                     pipe.execute()
-                    return f'Already remembered as memory {identity(old)} in project "{project}"; no duplicate saved.'
+                    return (f'Already remembered as memory {identity(old)} in project "{project}", '
+                            f'revision {old.revision}; no duplicate saved.')
                 note_id = secrets.token_hex(16)
                 memory_id = identity(old) if old else "n-" + note_id
                 revision = int(field(old, "revision", "1")) + 1 if old else 1
@@ -193,6 +222,8 @@ def commit_note(r, namespace, title, content, project, chunks, vectors, metadata
                 if old:
                     conflict_ids.update(json.loads(field(old, "conflicts", "[]")))
                 conflict_ids = sorted(conflict_ids)
+                # Read every linked revision's keys before entering MULTI.
+                linked = [(doc, revision_keys(r, namespace, doc)) for doc in conflicts]
                 pipe.multi()
                 if old:
                     for key in note_keys(namespace, old):
@@ -205,10 +236,11 @@ def commit_note(r, namespace, title, content, project, chunks, vectors, metadata
                         "part": n, "join_mode": "exact", "content": chunk,
                         "memory_id": memory_id, "revision": revision, "state": "current",
                         "conflicts": json.dumps(conflict_ids), "content_digest": digest(content),
+                        "relationship": relationship, "related_memory_id": related_memory_id,
+                        "related_revision": expected_revision if relationship else "",
                         "embedding": vector.tobytes()})
-                for doc in conflicts:
+                for doc, keys in linked:
                     ids = sorted(set(json.loads(field(doc, "conflicts", "[]"))) | {memory_id})
-                    keys = note_keys(namespace, doc) if doc.kind == "note" else [doc.id]
                     for key in keys:
                         pipe.hset(key, "conflicts", json.dumps(ids))
                 pipe.hincrby(store.META_KEY, "revision", 1)
@@ -264,13 +296,24 @@ def history(r, namespace, project, memory_id, before_revision=0, limit=5):
         doc = docs[0]
         revision = int(doc.revision)
         versions.append(f"Revision {revision} ({doc.state}), {field(doc, 'updated_at')}; "
-                        f"source: {field(doc, 'source', 'unknown')}\n{field(doc, 'heading')}\n\n"
+                        f"source: {field(doc, 'source', 'unknown')}; author: {field(doc, 'agent', 'unknown')}\n"
+                        f"{relationship_description(doc)}{field(doc, 'heading')}\n\n"
                         f"{bounded_text(text(r, namespace, doc))}")
         query = scope(project, memory_id) + f" @revision:[-inf ({revision}]"
     if not versions:
         return f'No matching history for memory {memory_id} in project "{project}".'
     return (f'History of {memory_id} in project "{project}". '
             f'For older entries pass before_revision={revision}.\n\n' + "\n\n---\n\n".join(versions))
+
+
+def relationship_description(doc):
+    details = ""
+    if field(doc, "relationship"):
+        details += (f"Relationship: {doc.relationship} {doc.related_memory_id}, "
+                    f"observed revision {doc.related_revision}.\n")
+    if json.loads(field(doc, "conflicts", "[]")):
+        details += f"Unresolved conflicts: {', '.join(json.loads(doc.conflicts))}.\n"
+    return details
 
 
 def backfill(r):

@@ -2,6 +2,7 @@
 retry hint after a failed directory-routed call."""
 import contextlib
 import json
+import io
 import os
 import unittest
 from unittest.mock import patch
@@ -68,6 +69,24 @@ class SelectionTests(unittest.TestCase):
     def test_directory_routing_without_selectors(self):
         with patch.dict(os.environ, {'MEMORY_CONTEXT': '', 'MEMORY_PROJECT': ''}):
             self.assertEqual(cli.selection('', ''), {'workdir': os.getcwd()})
+
+    def test_save_forwards_explicit_relation_and_read_revision(self):
+        argv = ['memory', 'save', 'Changed decision', '-c', 'projects', '-p', 'sample',
+                '--relationship', 'supersedes', '--related-memory-id', 'n-other-author', '--expected-revision', '2']
+        with patch('sys.argv', argv), patch('sys.stdin', io.StringIO('The accepted new behavior.')), \
+                patch.object(cli.anyio, 'run', return_value='saved') as run, contextlib.redirect_stdout(io.StringIO()):
+            cli.main()
+        self.assertEqual(run.call_args.args[1:], ('save_to_project_memory', {
+            'title': 'Changed decision', 'content': 'The accepted new behavior.', 'context': 'projects',
+            'project': 'sample', 'relationship': 'supersedes', 'related_memory_id': 'n-other-author',
+            'expected_revision': 2}))
+
+    def test_history_defaults_to_complete_latest_note(self):
+        with patch('sys.argv', ['memory', 'history', 'n-other-author', '-c', 'projects', '-p', 'sample']), \
+                patch.object(cli.anyio, 'run', return_value='full note') as run, contextlib.redirect_stdout(io.StringIO()):
+            cli.main()
+        self.assertEqual(run.call_args.args[1:], ('get_memory_history', {
+            'memory_id': 'n-other-author', 'limit': 1, 'before_revision': 0, 'context': 'projects', 'project': 'sample'}))
 
 
 @contextlib.asynccontextmanager

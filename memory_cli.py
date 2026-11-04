@@ -87,7 +87,7 @@ def text_of(result: types.CallToolResult) -> str:
     return "".join(block.text for block in result.content if isinstance(block, types.TextContent))
 
 
-async def call(tool: str, arguments: dict[str, str]) -> str:
+async def call(tool: str, arguments: dict) -> str:
     """Call one tool. When a call routed by directory fails (usually: no route for it), the error
     also lists the contexts, so an agent retries with -c/-p at once instead of spending a turn on
     `memory contexts`; on a slow local model that turn costs about a minute."""
@@ -118,7 +118,14 @@ def main() -> None:
     search.add_argument("--max-chars", type=int, default=MAX_CHARS, help=f"output bound, 0 = none (default {MAX_CHARS})")
     save = commands.add_parser("save", help="save a note; its content is read from stdin")
     save.add_argument("title")
-    for command in (search, save):
+    save.add_argument("--relationship", choices=["supersedes", "contradicts"], default="")
+    save.add_argument("--related-memory-id", default="")
+    save.add_argument("--expected-revision", type=int, default=0)
+    history = commands.add_parser("history", help="read the full current note and optional older revisions")
+    history.add_argument("memory_id")
+    history.add_argument("--limit", type=int, default=1)
+    history.add_argument("--before-revision", type=int, default=0)
+    for command in (search, save, history):
         command.add_argument("-c", "--context", default="", help="context from `memory contexts`")
         command.add_argument("-p", "--project", default="", help="project ID in that context")
     commands.add_parser("contexts", help="list contexts and project IDs")
@@ -134,7 +141,12 @@ def main() -> None:
             if not content.strip():
                 sys.exit("memory: the note content comes from stdin, e.g. memory save \"Title\" <<'EOF' ... EOF")
             print(anyio.run(call, "save_to_project_memory",
-                            {"title": args.title, "content": content, **selection(args.context, args.project)}))
+                            {"title": args.title, "content": content, **selection(args.context, args.project),
+                             "relationship": args.relationship, "related_memory_id": args.related_memory_id,
+                             "expected_revision": args.expected_revision}))
+        elif args.command == "history":
+            print(anyio.run(call, "get_memory_history", {"memory_id": args.memory_id, "limit": args.limit,
+                  "before_revision": args.before_revision, **selection(args.context, args.project)}))
         else:
             print(describe_contexts(anyio.run(call, "list_memory_contexts", {})))
     except ToolError as e:

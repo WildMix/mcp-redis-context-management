@@ -251,7 +251,8 @@ def rebuilt_records(r, old: Namespace, model) -> list[tuple[str, dict]]:
     """Re-chunk notes and stored doc paragraphs, preserving their provenance without source files."""
     fields = ["kind", "source", "heading", "content", "project", "note_id", "parts", "join_mode",
               "created", "updated_at", "source_modified_at", "agent", "branch", "worktree", "start_line", "end_line",
-              "memory_id", "revision", "state", "conflicts", "content_digest", "part", "topic_id", "document_id", "domain"]
+              "memory_id", "revision", "state", "conflicts", "content_digest", "part", "topic_id", "document_id", "domain",
+              "relationship", "related_memory_id", "related_revision"]
     notes: dict[str, list[tuple[int, dict]]] = {}
     docs: dict[str, list[tuple[str, dict]]] = {}
     for prefix in (old.notes, old.docs):

@@ -13,12 +13,27 @@ Use the shared `project-memory` MCP server:
 - Record lasting project decisions and their reasons in project documentation. When enabled, the
   background synchronizer imports documentation and saved agent memories automatically. The macOS
   setup leaves synchronization disabled; see [docs/MACOS_SETUP.md](docs/MACOS_SETUP.md).
-- `save_to_project_memory` remains optional for lasting knowledge missing from those sources.
-  The service checks duplicates and retains versions; agents do not manage history.
-  No end-of-turn memory review or response is required.
+- Assess lasting knowledge after accepted consequential decisions, verified reusable discoveries,
+  and before handing back completed substantial work. Assessment is required; saving is conditional.
+  Use `save_to_project_memory` in the correct writable context/project for decisions and rationale,
+  important constraints, cross-project contracts, rejected alternatives with reasons, and
+  non-obvious verified findings that could prevent repeated investigation or future mistakes.
+  Keep notes concise and self-contained, with scope, evidence and relevant dates. Distinguish plans
+  from implemented or deployed behavior. Skip routine edit summaries, test results, temporary
+  failures, task lists and speculation; never store secrets or raw transcripts.
+  Documented decisions can also merit a memory note because synchronization is disabled here.
+  Avoid knowingly repeating unchanged knowledge or saving PR/review status changes alone.
+  Agents choose semantic relationships, including to memories saved by other sessions: read the
+  complete current note with `get_memory_history(memory_id, limit=1)`, then save with
+  `relationship="supersedes"` for an established replacement or `"contradicts"` for an unresolved
+  disagreement, plus `related_memory_id` and the `expected_revision` read. Preserve still-valid
+  knowledge in a replacement; reassess a stale target before retrying. Plain saves are independent
+  except for exact duplicates. The service stores history; agents do not manipulate Redis or
+  snapshots. Saving nothing is valid and needs no routine announcement.
+  Report saves only after tool confirmation; report qualifying knowledge that could not be saved.
 
 See [README.md](README.md#using-it) for details.
-Version storage, local comparison, migration and deployment are described in
+Version storage, explicit relationships, migration and deployment are described in
 [Memory history](docs/MEMORY_HISTORY_PROPOSAL.md).
 
 External MCP sources can augment searches through an enforced search/fetch allowlist.

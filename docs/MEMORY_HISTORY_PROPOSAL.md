@@ -1,16 +1,54 @@
 # Memory history
 
-Implemented design, 2026-10-29. The agreed scope is version history behind the
-existing save/search interface. There are no corpus snapshot objects, agent-managed
-commits, semantic clustering, or additional databases.
+Implemented design, updated 2026-11-04. Agents explicitly identify semantic
+relationships; the service validates and stores revisions/conflicts. This replaces
+the automatic NLI comparison introduced on 2026-10-29. There are no corpus snapshot
+objects, agent-managed commits, semantic clustering, or additional databases.
 
 ## Agent interface
 
 Agents save useful information using `save_to_project_memory(title, content, ...)`.
-The service checks for exact duplicates, compares relevant current memories, and
-retains old versions when it accepts an update. Include scope, dates and evidence
-in ordinary prose when known; no version identifiers or special update syntax are
-required from the agent. Agents still decide what knowledge is worth retaining.
+An ordinary save creates an independent memory; exact duplicate current content in
+that context/project is a no-op. Similarity and words such as "supersedes" in the
+body never decide relationships automatically.
+
+For an update or disagreement, first read the complete current note with
+`get_memory_history(memory_id, limit=1, context=..., project=...)`. A note the agent
+just saved is already known in full. Then pass three optional save arguments:
+
+```python
+save_to_project_memory(
+    title="Consumer owns change detection",
+    content="The accepted design is ... Its reason and evidence are ...",
+    context="projects", project="application",
+    relationship="supersedes",
+    related_memory_id="n-<ID returned by search/save>",
+    expected_revision=1,  # the target revision that was read
+)
+```
+
+- `supersedes`: a self-contained replacement/extension advances the same memory
+  ID and archives the old note. Preserve still-valid knowledge, explain the changed
+  fact/decision, and cite its evidence. A prior workaround can remain technically
+  valid while the accepted architectural choice changes.
+- `contradicts`: an unresolved disagreement creates a separate current note and
+  links both memories. It does not choose which statement is correct.
+- Any session/agent may target a note created by another session/agent in the same
+  writable context/project. Original authorship/text remain on each revision.
+- Both relationships require the target's observed revision. If another writer
+  changed it, the request fails with the current revision/text; the agent must
+  reassess rather than blindly increment the revision and retry.
+- Agent saves cannot supersede curated documents. They may link a contradictory
+  note; the source document remains current until its normal publication changes.
+
+The shell client supports the same workflow with `memory history ID -c CONTEXT
+-p PROJECT` and `memory save TITLE --relationship supersedes --related-memory-id
+ID --expected-revision 1 -c CONTEXT -p PROJECT` (body from stdin).
+
+Save durable technical knowledge, not review progress: PR approval/merge status,
+build results, pending tasks and refreshed timestamps alone do not justify a save
+or revision. PR/commit references support technical conclusions. Retain necessary
+scope/evidence qualifications without turning a note into a review handoff.
 
 Search uses the existing embeddings, initially retrieves 30 chunks, and groups
 matches into three logical memories. Candidate expansion is bounded at 960 chunks.
@@ -20,51 +58,38 @@ was outside the similarity results. Retired sources have no current replacement.
 
 Results expose a stable memory ID, revision, status, older-version count and
 unresolved conflict links. `get_memory_history(memory_id, context=..., project=...)`
-is an optional read-only tool. It returns five revisions by default (maximum ten),
+is a read-only tool. It returns five revisions by default (maximum ten),
 with `before_revision` pagination. Ordinary document revisions are reconstructed
 from their chunks; output beyond 12,000 characters per document is explicitly
 truncated. Notes retain their exact original text and existing 6,000-character cap.
 Context/project isolation and configured read-only permissions apply as before.
 
-## Local semantic comparison
+## Relationship validation
 
-The existing all-MiniLM-L6-v2 embedding model remains unchanged. A second local
-model, `cross-encoder/nli-deberta-v3-base`, compares retrieved statements. It is pinned
-at `6c749ce3425cd33b46d187e45b92bbf96ee12ec7`, loaded once in the shared MCP process,
-and warmed at HTTP startup. Neither model sends corpus text to an external service.
-Provision weights before offline startup:
+The local all-MiniLM-L6-v2 model still embeds saves and searches. The server no
+longer runs an NLI classifier, applies an acronym/environment equality test, or
+fits whole-note comparisons into a 512-token model window. Agents already have
+the discussion and evidence needed to choose the meaning of a relationship.
+Provision embedding weights before offline startup:
 
 ```sh
 .venv/bin/python scripts/provision-models.py
 ```
 
-The save path considers at most eight distinct related current memories, using up
-to eight incoming chunk vectors and a cosine floor of 0.55. These are bounded
-retrieval heuristics, not guarantees of exhaustive matching. Comparison evaluates
-entailment/contradiction in both directions and refuses to truncate oversized
-inputs. Classification thresholds and conservative checks are in
-`memory_relations.py`; they are heuristics, not calibrated truth probabilities.
+Validation is deterministic: accepted relation name, complete target/revision
+arguments, current target, same context/project, write permissions and optimistic
+concurrency. No author ownership restriction applies. This does not prove an
+agent's semantic judgment correct; original texts and evidence remain available.
 
-- Exact duplicate current content is a no-op, including retries after a lost reply.
-- An unambiguous paraphrase or extension becomes the next revision when the
-  classifier judges that it preserves the old information. Both original texts
-  remain stored; equivalent wording does not crowd search as a separate memory.
-- Contradictory replacements require a single-claim old note and an explicit,
-  non-speculative transition in ordinary prose, such as "now" or "no longer".
-- Multiple competing replacement candidates, ordinary contradictions, and
-  disagreements with curated reference documents are retained with conflict links.
-  Agent saves do not overwrite curated reference documents.
-- Uncertain comparisons, long inputs and detected differences in environment,
-  component acronym or older dated evidence remain additive. Semantically similar
-  text is not discarded merely because a model calls it equivalent.
-
-The classifier is trained for English. Arbitrary scope differences, temporal
-meaning and multilingual text are not reliably solved by NLI. False negatives
-can create additional memories; false positives remain possible, but superseded
-text stays available and source evidence remains important. No semantic accuracy
-beyond the exercised cases is claimed. `MEMORY_RELATIONS=off` disables inference;
-exact duplicate checks and versioned document publication still work, while note
-saves remain additive. Missing enabled model weights fail explicitly.
+Exact retries of a supersession are idempotent while the resulting revision is
+still current. If the memory advanced again, a stale retry is rejected. An exact
+contradiction retry is a no-op when its conflict link already exists and the target
+revision still matches. A new relationship is never silently dropped by duplicate
+detection: an existing identical note without the requested contradiction yields
+an error identifying that memory. This API does not merge two existing families.
+Conflicts are retained across later revisions; a new revision does not implicitly
+settle every earlier disagreement. The old `MEMORY_RELATIONS` switch is obsolete;
+explicit relationships are always available subject to context write permissions.
 
 ## Redis representation
 
@@ -77,6 +102,9 @@ carries additional fields:
 | `revision` | Version number starting at one |
 | `state` | `current`, `historical`, or `retired` |
 | `part` | Chunk order inside the version |
+| `relationship` | Agent-declared `supersedes`, `contradicts`, or empty |
+| `related_memory_id` | Target memory ID in the same context/project |
+| `related_revision` | Target revision the agent observed |
 | `conflicts` | Other memory IDs with unresolved conflicting evidence |
 | `content_digest` | Whole-note content hash for exact duplicate detection |
 
@@ -93,8 +121,9 @@ file revisions the same way. Unchanged documents do not create artificial versio
 Publication deletion retires the source while retaining its searchable history.
 There is no new purge or retention policy in this change.
 
-Save comparison watches the store's mutation revision before reading candidates.
-Concurrent changes cause reconciliation to retry. New chunks, retirement flags,
+Saving watches the store's mutation revision before reading the target/duplicates.
+Concurrent changes cause validation to retry; a changed target rejects stale intent.
+New chunks, retirement flags,
 conflict links and the store revision are committed in one transaction. Exact
 retry deduplication is scoped to current content; the API does not claim a general
 cross-system exactly-once protocol. Curated/directory publication follows existing
@@ -120,16 +149,41 @@ metadata in place, preserving keys, text, embeddings and curated manifests. It i
 repeatable. Existing notes are not retrospectively reconciled and missing older
 versions cannot be recovered. New stores create the extended schema automatically.
 
-After provisioning models and migrating, restart the existing MCP process. On this
+After provisioning embeddings and migrating, restart the existing MCP process. On this
 Mac the LaunchAgent is `local.project-memory.mcp`; `/health` reports
-`memory_history: 1` and the local comparison model. Client sessions may need to
-reconnect to discover the optional history tool; save/search signatures are unchanged.
+`memory_history: 1`, `memory_relationships: "explicit"` and `relation_model: "off"`.
+Already versioned installations need no Redis migration for explicit relationships:
+the new provenance fields are optional on old hashes. Existing unrelated notes are
+not automatically regrouped. Restart the server and reconnect clients to discover
+the new optional save arguments. Existing plain-save clients remain compatible.
 
 ## Verification
 
-Tests cover exact retry deduplication, concurrent updates, failed writes, multiple
+Tests cover exact retry deduplication, stale concurrent updates, failed writes, multiple
 chunks, historical matches with current replacements, conflict links, project
 isolation, paginated history, legacy metadata initialization, document retirement,
-rebuilds, and existing import/export/HTTP behavior. Real-model tests include a
-simple asserted update and distinct production/staging scope. Production rollout
-also compares corpus text/vector checksums before and after initialization.
+rebuilds, cross-author relationships, explicit intent without semantic guessing,
+and existing import/export/HTTP behavior. Real-model tests use cached embeddings.
+
+`tests/run_agent_relationships.py` is an opt-in real Codex-session evaluation with
+synthetic technical evidence. It requires an empty disposable Redis container with
+the label `project-memory-test=explicit-relationships`, a loopback port other than
+6379/6380/6381 and no persistent mounts. It starts a separate MCP process/context;
+test agents ignore normal Codex MCP configuration and have shell/apps/web disabled.
+It checks supersession and unresolved contradiction both within one resumed session
+and through a fresh session reading another session's notes, plus a status-only
+no-save case and a fresh reader's interpretation. JSONL transcripts and persisted
+relationship assertions are retained in the selected output directory. These cases
+exercise the workflow, not a general guarantee of semantic accuracy.
+
+```sh
+docker run -d --name project-memory-relationships-test \
+  --label project-memory-test=explicit-relationships \
+  -p 127.0.0.1:6392:6379 --tmpfs /data:rw,size=128m \
+  -e 'REDIS_ARGS=--save "" --appendonly no' \
+  redis/redis-stack@sha256:5d5154123426693540ea6c1d9e638eae2bf2024879c839db6fcfdd7717e817c7
+.venv/bin/python tests/run_agent_relationships.py \
+  --redis-url redis://127.0.0.1:6392/0 --container project-memory-relationships-test \
+  --output .migration/agent-relationships/run
+docker rm -f project-memory-relationships-test
+```
