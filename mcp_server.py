@@ -47,15 +47,32 @@ TOP_K = 3
 CANDIDATES = 30
 MAX_NOTE_CHARS = 6000
 
+RETRIEVAL_GUIDANCE = (
+    "Search project memory before answering, planning or editing when required project knowledge "
+    "is missing from the active conversation and files you have read. Reuse relevant retrieved "
+    "facts and source references that are still available and sufficient; a new prompt or a longer "
+    "conversation alone is not a reason to repeat a lookup. Search for uncovered topics or scopes, "
+    "when freshness matters, when the user requests verification, or when evidence conflicts. "
+    "After compaction or resume, reuse only details actually retained in the active context; "
+    "a statement that a topic was previously searched is not the result itself. Retrieve missing "
+    "details with a focused search or read a known memory ID with get_memory_history. Do not "
+    "assume a session-wide already-seen flag means the content is still available. Keep source "
+    "IDs, context/project and revisions with reused facts; prior reads do not establish current "
+    "revisions or write permissions. Reuse the context catalog while it covers the required scopes; "
+    "refresh it for unknown scopes or current permissions. Do not guess missing project history."
+)
+
 SEARCH_GUIDANCE = (
-    "For questions spanning multiple topics or projects, first use list_memory_contexts and its "
+    "For questions spanning multiple topics or projects, use list_memory_contexts or its retained "
     "resources to map each topic to the relevant context/project. A question spanning contexts or projects "
-    "requires separate search_project_memory calls with focused subqueries in EVERY relevant context/project; "
+    "requires evidence from EVERY relevant context/project. Reuse sufficient evidence still in the active "
+    "context; for uncovered or freshness-sensitive parts, make separate search_project_memory calls "
+    "with focused subqueries in each relevant context/project; "
     "do not send the whole mixed question to just one project or repeat it unchanged in every scope. "
     "Comparisons need evidence for each side, with additional focused searches if the top three "
     "results omit a part. Combine the findings, identifying each context/project and its sources. "
     "A miss in one scope says nothing about another. Multiple clearly requested scopes are not "
-    "ambiguous intent: search each relevant scope without asking the user to choose only one. "
+    "ambiguous intent: cover each relevant scope without asking the user to choose only one. "
     "Do not search unrelated scopes for a single-topic question."
 )
 
@@ -167,10 +184,7 @@ mcp = FastMCP(
                  "context or project. " + SEARCH_GUIDANCE + " Each context defines its own read-only status. "
                  "CRITICAL: this server is the long-term memory of the project you are working in, shared by every "
                  "agent and worktree: notes earlier sessions saved about what they changed and decided, plus the "
-                 "project's docs and handoffs. Call search_project_memory WHENEVER the user asks about the "
-                 "project's architecture, design, past sessions, decisions or an implementation that is not "
-                 "visible in the files you have open, before answering, planning or editing. Do not guess and do "
-                 "not say you lack context: search first (if the tool is deferred, load it by name). Save with "
+                 "project's docs and handoffs. " + RETRIEVAL_GUIDANCE + " Save with "
                  "save_to_project_memory lasting knowledge about this project (decisions and their "
                  "reasons, constraints, gotchas). Skip PR/review status changes and unchanged knowledge. "
                  "Agents decide semantic relationships, including to notes saved by other sessions. "
@@ -424,9 +438,11 @@ async def list_memory_contexts() -> str:
     search_project_memory or save_to_project_memory. A fixed-project context needs only context;
     other contexts require an explicit project. The resources map shows which documents belong to
     each project, including components grouped under one shared project. Match the question's
-    topics to those resources, allowing common acronym/spelling variants. For questions spanning contexts or projects,
-    make separate focused search_project_memory calls in each relevant context/project
-    and combine the evidence. Do not choose only one scope for a clearly mixed question.
+    topics to those resources, allowing common acronym/spelling variants. Reuse a retained catalog
+    when it covers the required scopes; refresh it for unknown scopes or current permissions.
+    For questions spanning contexts or projects, obtain evidence for each relevant scope, reusing
+    sufficient results still in the active context and searching uncovered or freshness-sensitive parts.
+    Combine the evidence. Do not choose only one scope for a clearly mixed question.
     Writable contexts can create a new project using a valid project ID.
     """
     if _router is None:
@@ -444,10 +460,16 @@ async def list_memory_contexts() -> str:
 @mcp.tool()
 async def search_project_memory(query: str, ctx: Context, workdir: str = "",
                                 context: str = "", project: str = "") -> str:
-    """CRITICAL: Use this tool WHENEVER the user asks about the project's architecture, design, past
-    sessions, decisions or specific implementations that are not immediately visible in your current file
-    context. DO NOT guess or apologize for lacking context: you MUST call this tool first to retrieve the
-    project history before answering.
+    """Search when required project knowledge is missing from the active conversation and files you
+    have read. Reuse relevant retrieved facts and source references that are still available and
+    sufficient; a new prompt or a longer conversation alone does not require another lookup.
+    Search uncovered topics/scopes, freshness-sensitive questions, explicit verification requests,
+    or conflicting evidence. Do not guess missing project history.
+
+    After compaction or resume, reuse only details actually retained in the active context.
+    Knowing that a search happened is not knowing its results: retrieve missing details with a
+    focused search or get_memory_history for a known ID. Keep context/project, source IDs and
+    revisions with reused facts. Earlier reads do not establish current revisions or permissions.
 
     It searches the long-term memory of the project you are working in: notes other agents saved about
     what they changed and decided, and the project's docs (design notes, handoffs, earlier memory files).
@@ -455,15 +477,16 @@ async def search_project_memory(query: str, ctx: Context, workdir: str = "",
     configured Redis contexts are isolated. Select context/project to search from anywhere without
     a local checkout. Otherwise unmapped directories are rejected in routed mode.
 
-    Each call searches ONLY ONE context/project. For a question spanning contexts/projects, first call
-    list_memory_contexts to map topics using its resources, then split the question and search each
-    relevant context/project separately with a focused subquery. For comparisons, retrieve evidence
-    for each side. Do not send the full mixed question to just one project or treat its results as
+    Each call searches ONLY ONE context/project. For a question spanning contexts/projects, use
+    list_memory_contexts or its retained catalog to map topics, then search uncovered or
+    freshness-sensitive parts separately in each relevant scope. Comparisons need evidence for
+    each side; reuse sufficient evidence already available. Do not send the full mixed question to just one project or treat its results as
     covering other scopes. Combine the findings with their context/project and source attribution.
 
     Ask in natural language ("how is authentication wired?", "why did the build move to clang?"). If a
-    search misses, rephrase it (other words, the feature's or file's name) before concluding that nothing
-    is recorded. Returns the 3 most similar memories, grouping their versions, and where each comes from: for a doc, open the file at
+    search misses, try a focused rephrasing (other words, the feature's or file's name) before concluding
+    that nothing is recorded. Do not repeat the same unsuccessful searches on later prompts without
+    a new lead or a freshness reason. Returns the 3 most similar memories, grouping their versions, and where each comes from: for a doc, open the file at
     the given lines for the surrounding context; curated sources are portable paths relative to
     the corpus bundle. Historical matches identify their current replacement. Use get_memory_history
     optionally to inspect older versions. Check retrieved statements against current evidence.

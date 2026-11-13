@@ -604,8 +604,8 @@ and the timestamps below. No agent turn should be interrupted for a memory revie
 ## Using it
 
 The background job synchronizes project sources. Searching depends on the agent deciding to look things up. The
-tool's description and the server's instructions already tell agents to search before answering
-about design, past work or code they can't see. A guardrail in the project's own instruction files
+tool's description and the server's instructions tell agents to retrieve missing project knowledge
+and reuse sufficient evidence still available in the active conversation. A guardrail in the project's own instruction files
 makes it stick, because agents read those at the start of every session. Put this in `AGENTS.md`
 (Codex and others) and in `CLAUDE.md` (Claude Code). In `CLAUDE.md`, write the tool names in full:
 `mcp__project-memory__search_project_memory` and `mcp__project-memory__save_to_project_memory`.
@@ -616,7 +616,17 @@ makes it stick, because agents read those at the start of every session. Put thi
 Use the shared `project-memory` MCP server:
 
 - Call `search_project_memory` before answering, planning or editing in an unfamiliar project area.
-  Rephrase missed searches, read cited docs, and check historical notes against current code.
+  Reuse relevant retrieved facts and source references still available and sufficient in the active
+  conversation. A new prompt or longer conversation alone does not require another lookup.
+  Search uncovered topics/scopes, freshness-sensitive questions, explicit verification requests,
+  or conflicting evidence. After compaction or resume, retrieve details missing from the retained
+  context with a focused search or `get_memory_history` for a known ID; knowing a search happened
+  is not knowing its results. Preserve context/project, source IDs and revisions with reused facts.
+  Earlier reads do not establish current revisions or write permissions. Reuse the context catalog
+  while it covers the required scopes; refresh it for unknown scopes or current permissions.
+  Mixed questions still need evidence for every relevant scope; search only missing or stale parts.
+  Try a focused rephrasing after a miss; do not repeat known misses without a new lead or freshness
+  reason. Read cited docs and check historical notes against current code.
 - Record lasting project decisions and their reasons in project documentation, which is
   synchronized automatically. `save_to_project_memory` remains optional for lasting knowledge
   missing from those sources; search for duplicates first. No end-of-turn review is required.
@@ -889,6 +899,29 @@ heading levels, project IDs, search deduplication, source timestamps, sync fresh
 process locks, and selective removal of old hook registrations. HTTP tests
 also cover concurrent clients, project isolation, client roots, missing workdir, reconnects, shared
 model lifetime, and Host/Origin rejection. Real HTTP tests use the same real-model opt-in above.
+
+To evaluate retrieval decisions in real multi-prompt Codex conversations:
+
+```sh
+.venv/bin/python tests/run_agent_retrieval.py --output .migration/retrieval-eval/run
+```
+
+This opt-in test uses the authenticated Codex app-server and inherits its configured model and
+reasoning effort. It runs production MCP instructions and tool handlers over deterministic,
+read-only synthetic storage; it does not connect to Redis, external sources or other configured
+MCP servers. Shell tools and web search are disabled. It checks follow-up reuse, several large
+intervening prompts, missing topics, partial coverage across projects, explicit freshness checks,
+conflicting evidence, client restart/resume, an actual `thread/compact/start` operation, recovery
+from a handoff missing a known note's details, and a fresh session. Assertions inspect tool traces
+and answer facts; compaction must produce a completed event. Raw events, answers, returned character
+counts and reported token usage are retained under the output directory. These are behavioral
+samples, not a guarantee across models or a Redis search-quality benchmark.
+
+For comparison, pass `--baseline-source /path/to/previous/mcp_server.py`; this runs the same short
+follow-ups with the earlier server instructions. `--long-turns` and `--rows-per-turn` control the
+long-context stage. `--agent-instructions /path/to/prepared-instructions.txt` also supplies a global
+instruction file as developer instructions, checking the combined guidance. Prompt caching metrics
+and context length are separate from retrieval counts.
 
 ## Startup time and a Windows trap
 

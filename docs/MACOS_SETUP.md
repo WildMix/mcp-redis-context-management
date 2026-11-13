@@ -84,15 +84,31 @@ selectively. Restart existing client sessions after registration. These are the 
 [Codex HTTP settings](https://learn.chatgpt.com/docs/extend/mcp) and
 [Claude Code user-scope settings](https://code.claude.com/docs/en/mcp).
 
-Agent instructions should require searching project memory before unfamiliar work. From any directory,
-call `list_memory_contexts()` and pass `context="reference"`, or `context="projects"` with the desired
+Agent instructions require retrieving missing project knowledge, while reusing sufficient facts
+and source references still available in the active conversation. A new prompt or longer session
+alone is not a reason to repeat a search. Retrieve uncovered topics, freshness-sensitive information,
+explicit verification requests and conflicting evidence. After compaction/resume, recover missing
+details with a focused search or `get_memory_history` for a known ID; a retained statement that a
+search happened is not the result itself. Preserve context/project, source IDs and revisions with
+reused facts. Earlier reads do not establish current revisions or write permissions.
+
+From any directory, call `list_memory_contexts()` when its catalog is missing, does not cover the
+required scopes, or current permissions need checking; otherwise reuse it. Pass `context="reference"`, or `context="projects"` with the desired
 `project`. No `workdir` is needed. For automatic directory selection, pass the current absolute project
 directory as `workdir`. Record decisions in project documentation and save lasting notes in writable contexts
 explicitly when appropriate. Allow `mcp__project-memory__list_memory_contexts` in Claude's permissions
 alongside the search/save tools if those are explicitly allowed.
-For questions spanning contexts or projects, use the discovery tool's document names to map topics, then query
-each relevant scope separately with focused questions and combine the cited results. A multi-topic
+For questions spanning contexts or projects, use the catalog's document names to map topics. Obtain
+evidence for every relevant scope, reusing sufficient evidence still in context and searching
+uncovered or freshness-sensitive parts separately. Combine the cited results. A multi-topic
 request is not a reason to force the user to choose only one context.
+
+The retrieval policy is instruction-based: the server does not suppress previously returned
+results or keep a session-wide seen list. This allows recovery when the client's context changes.
+After changing server instructions, restart `local.project-memory.mcp` and start new client sessions
+so cached tool descriptions refresh. Also update the marked `project-memory` blocks in
+`~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`, `~/.copilot/copilot-instructions.md`, and
+`~/.gemini/GEMINI.md`, preserving other instructions and client-specific transport rules.
 
 ## Synchronization is disabled
 

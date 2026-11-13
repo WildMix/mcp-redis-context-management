@@ -4,12 +4,23 @@ Use the shared `project-memory` MCP server:
 
 - From any directory, call `list_memory_contexts` and select `context` plus `project` where required.
   Explicit selection needs no checkout; `workdir` remains available for automatic directory routing.
+- Reuse a retained context catalog when it covers the required scopes; refresh it for unknown
+  scopes or current permissions.
 - For questions spanning contexts/projects, use the catalog's resource names to map each topic,
-  then make separate focused searches in every relevant scope and combine the cited findings.
+  then obtain evidence for every relevant scope and combine the cited findings. Reuse sufficient
+  evidence still in the active context; search uncovered or freshness-sensitive parts separately.
   A question spanning contexts/projects requires each relevant scope; do not force the user to choose just one context.
   Comparisons need evidence for each side. A miss in one scope does not establish absence elsewhere.
 - Call `search_project_memory` before answering, planning or editing in an unfamiliar project area.
-  Rephrase missed searches, read cited docs, and check historical notes against current code.
+  Reuse relevant retrieved facts and source references still available and sufficient in the active
+  conversation. A new prompt or a longer conversation alone does not require another lookup.
+  Search uncovered topics/scopes, freshness-sensitive questions, explicit verification requests,
+  or conflicting evidence. After compaction or resume, reuse only details actually retained:
+  knowing a search happened is not knowing its results. Retrieve missing details with a focused
+  search or `get_memory_history` for a known ID. Keep context/project, source IDs and revisions
+  with reused facts; earlier reads do not establish current revisions or write permissions.
+  Try a focused rephrasing after a miss, but do not repeat known unsuccessful searches on later
+  prompts without a new lead or freshness reason. Read cited docs and check notes against current code.
 - Record lasting project decisions and their reasons in project documentation. When enabled, the
   background synchronizer imports documentation and saved agent memories automatically. The macOS
   setup leaves synchronization disabled; see [docs/MACOS_SETUP.md](docs/MACOS_SETUP.md).
